@@ -1,0 +1,109 @@
+"""HTML report (spec §3.5): one self-contained page — heat map (time x frequency), band summary,
+hour-by-weekday matrix when the run spans more than an hour, quietest channels table.
+plotly.js is loaded from cdnjs at view time; all data is embedded as JSON."""
+from __future__ import annotations
+import datetime as dt
+import html
+import json
+from ..plan.grid import label_for
+
+PLOTLY_URL = "https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js"
+
+
+def quietest(channels: list[dict], n: int = 10) -> list[dict]:
+    """Rank by busy fraction, then by the lowest P90, then by the lowest floor."""
+    return sorted(channels, key=lambda c: (round(c["busy_mean"], 3), c["p90_med"], c["floor_med"]))[:n]
+
+
+def _iso(ts: float) -> str:
+    return dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def build_data(store, run_id=None, bucket_s: int = 60, rssi_offset_db: float = 0.0) -> dict:
+    chans = store.channel_summary(run_id)
+    for c in chans:
+        c["label"] = label_for(c["freq_hz"])
+        c["mhz"] = c["freq_hz"] / 1e6
+    freqs = [c["freq_hz"] for c in chans]
+    tb = store.time_buckets(bucket_s, run_id)
+    buckets = sorted({b["bucket"] for b in tb})
+    idx_f = {f: i for i, f in enumerate(freqs)}
+    idx_b = {b: i for i, b in enumerate(buckets)}
+    z_busy = [[None] * len(buckets) for _ in freqs]
+    z_p90 = [[None] * len(buckets) for _ in freqs]
+    for b in tb:
+        if b["freq_hz"] in idx_f:
+            z_busy[idx_f[b["freq_hz"]]][idx_b[b["bucket"]]] = round(b["busy_mean"], 4)
+            z_p90[idx_f[b["freq_hz"]]][idx_b[b["bucket"]]] = round(b["p90_mean"] + rssi_offset_db, 1)
+    # hour x weekday occupancy (all channels pooled), only meaningful when the span exceeds an hour
+    span = (buckets[-1] - buckets[0]) if len(buckets) > 1 else 0.0
+    when = [[None] * 24 for _ in range(7)]
+    if span > 3600:
+        acc: dict[tuple, list] = {}
+        for b in tb:
+            d = dt.datetime.fromtimestamp(b["bucket"], dt.timezone.utc)
+            acc.setdefault((d.weekday(), d.hour), [0.0, 0]); acc[(d.weekday(), d.hour)][0] += b["busy_mean"]; acc[(d.weekday(), d.hour)][1] += 1
+        for (wd, h), (s, n) in acc.items():
+            when[wd][h] = round(s / n, 4)
+    runs = store.runs()
+    return {
+        "generated": _iso(dt.datetime.now(dt.timezone.utc).timestamp()),
+        "runs": runs, "rssi_offset_db": rssi_offset_db,
+        "calibration": "calibrated (offset %+.1f dB applied)" % rssi_offset_db if rssi_offset_db else "relative (uncalibrated)",
+        "channels": [{**c, "floor_med": c["floor_med"] + rssi_offset_db, "p90_med": c["p90_med"] + rssi_offset_db, "peak_max": c["peak_max"] + rssi_offset_db} for c in chans],
+        "heat": {"freqs_mhz": [f / 1e6 for f in freqs], "buckets": [_iso(b) for b in buckets], "busy": z_busy, "p90": z_p90, "bucket_s": bucket_s},
+        "when": when, "span_s": span,
+        "quietest": [{k: c[k] for k in ("freq_hz", "mhz", "label", "busy_mean", "floor_med", "p90_med", "peak_max", "n_rows")} for c in quietest(
+            [{**c, "floor_med": c["floor_med"] + rssi_offset_db, "p90_med": c["p90_med"] + rssi_offset_db, "peak_max": c["peak_max"] + rssi_offset_db} for c in chans], 10)],
+    }
+
+
+_PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title>
+<style>
+:root{{--bg:#F3F5F7;--paper:#fff;--ink:#1B2430;--muted:#5B6B7A;--line:#D5DCE3;--accent:#0E7C7B}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#0F151B;--paper:#161E26;--ink:#E4EAF0;--muted:#98A6B4;--line:#2A3540;--accent:#4FC1BE}}}}
+body{{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif;padding:1.5rem 1rem 4rem}}
+main{{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:1.2rem}}
+h1{{margin:0;font-size:1.5rem}} h2{{margin:1rem 0 .3rem;font-size:1.1rem}} .meta{{color:var(--muted);font-size:.9rem;display:flex;gap:1.2rem;flex-wrap:wrap}}
+.fig{{background:var(--paper);border:1px solid var(--line);padding:.5rem;min-height:320px}}
+table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:.9rem}} th,td{{padding:.3rem .6rem;border-bottom:1px solid var(--line);text-align:right}} th:nth-child(2),td:nth-child(2){{text-align:left}}
+.note{{color:var(--muted);font-size:.85rem}}
+</style></head><body><main>
+<h1>{title}</h1>
+<div class="meta"><span>generated {generated}</span><span>runs: {runs}</span><span>levels: <b>{calibration}</b></span><span>bucket {bucket_s}s</span></div>
+<h2>Occupancy heat map</h2><div class="note">colour = fraction of RSSI samples more than the busy threshold above the channel floor (busy fraction); toggle to P90 level with the buttons.</div>
+<div id="heat" class="fig"></div>
+<h2>Band summary</h2><div class="note">bar = floor (P10) to peak per channel; label = busy %.</div>
+<div id="band" class="fig"></div>
+<div id="when-wrap" hidden><h2>When is it busy</h2><div class="note">mean busy fraction across all channels by hour of day (UTC) and weekday; needs a run longer than an hour.</div><div id="when" class="fig"></div></div>
+<h2>Quietest channels</h2>
+<table><thead><tr><th>MHz</th><th>who lives here</th><th>busy %</th><th>floor dBm</th><th>P90 dBm</th><th>peak dBm</th><th>rows</th></tr></thead><tbody>{quiet_rows}</tbody></table>
+<div class="note">Levels are {calibration}. Busy threshold and floor definition: floor = P10 of the dwell's samples, busy = samples above floor + 8 dB (lorascan defaults).</div>
+<script id="lorascan-data" type="application/json">{data_json}</script>
+<script src="{plotly}"></script>
+<script>
+const D=JSON.parse(document.getElementById('lorascan-data').textContent);
+const dark=matchMedia('(prefers-color-scheme: dark)').matches;
+const lay=(t)=>({{margin:{{l:70,r:20,t:30,b:60}},paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'rgba(0,0,0,0)',font:{{color:dark?'#E4EAF0':'#1B2430'}},title:t}});
+const heatBusy={{type:'heatmap',x:D.heat.buckets,y:D.heat.freqs_mhz,z:D.heat.busy,colorscale:'YlOrRd',zmin:0,zmax:1,colorbar:{{title:'busy'}},hovertemplate:'%{{y}} MHz<br>%{{x}}<br>busy %{{z}}<extra></extra>'}};
+const heatP90={{type:'heatmap',x:D.heat.buckets,y:D.heat.freqs_mhz,z:D.heat.p90,colorscale:'Viridis',colorbar:{{title:'P90 dBm'}},visible:false,hovertemplate:'%{{y}} MHz<br>%{{x}}<br>P90 %{{z}} dBm<extra></extra>'}};
+Plotly.newPlot('heat',[heatBusy,heatP90],Object.assign(lay(''),{{yaxis:{{title:'MHz'}},xaxis:{{title:'time (UTC)'}},updatemenus:[{{type:'buttons',x:0,y:1.15,buttons:[{{label:'busy fraction',method:'update',args:[{{visible:[true,false]}}]}},{{label:'P90 level',method:'update',args:[{{visible:[false,true]}}]}}]}}]}}),{{responsive:true}});
+const C=D.channels;
+Plotly.newPlot('band',[{{type:'bar',x:C.map(c=>c.mhz),y:C.map(c=>c.peak_max-c.floor_med),base:C.map(c=>c.floor_med),marker:{{color:C.map(c=>c.busy_mean),colorscale:'YlOrRd',cmin:0,cmax:1}},text:C.map(c=>(c.busy_mean*100).toFixed(1)+'%'+(c.label?' · '+c.label:'')),textposition:'outside',hovertemplate:'%{{x}} MHz<br>floor %{{base}} dBm → peak %{{y}}<extra></extra>',width:0.15}}],Object.assign(lay(''),{{yaxis:{{title:'dBm'}},xaxis:{{title:'MHz'}}}}),{{responsive:true}});
+if(D.span_s>3600){{document.getElementById('when-wrap').hidden=false;Plotly.newPlot('when',[{{type:'heatmap',x:[...Array(24).keys()],y:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],z:D.when,colorscale:'YlOrRd',zmin:0,zmax:1,colorbar:{{title:'busy'}}}}],Object.assign(lay(''),{{xaxis:{{title:'hour (UTC)'}}}}),{{responsive:true}});}}
+</script></main></body></html>
+"""
+
+
+def render_report(store, out_path: str, title: str = "lorascan report", run_id=None, bucket_s: int = 60, rssi_offset_db: float = 0.0) -> str:
+    d = build_data(store, run_id, bucket_s, rssi_offset_db)
+    rows = "".join(
+        f"<tr><td>{c['mhz']:.3f}</td><td>{html.escape(c['label'])}</td><td>{c['busy_mean']*100:.1f}</td><td>{c['floor_med']:.0f}</td><td>{c['p90_med']:.0f}</td><td>{c['peak_max']:.0f}</td><td>{c['n_rows']}</td></tr>"
+        for c in d["quietest"])
+    runs = ", ".join(f"#{r['id']} {r['kind']} ({r['profile']}) {_iso(r['first_ts']) if r['first_ts'] else '-'} → {_iso(r['last_ts']) if r['last_ts'] else '-'}" for r in d["runs"]) or "none"
+    page = _PAGE.format(title=html.escape(title), generated=d["generated"], runs=html.escape(runs), calibration=d["calibration"],
+                        bucket_s=bucket_s, quiet_rows=rows, data_json=json.dumps(d).replace("</", "<\\/"), plotly=PLOTLY_URL)
+    with open(out_path, "w") as f:
+        f.write(page)
+    return page
