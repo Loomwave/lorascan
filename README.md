@@ -12,8 +12,10 @@ phase 1 (P1): energy layer, quick and survey scans, SQLite store, HTML report, s
 
 ```
 sudo apt install python3-spidev python3-libgpiod
-pip install .            # or: pip install -e .   (developer)
+pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.0/lorascan-0.1.0-py3-none-any.whl
+# or from a checkout of https://github.com/Loomwave/lorascan :  pip install .   (developer: pip install -e .)
 ```
+Issues and results: https://github.com/Loomwave/lorascan/issues
 No other Python dependencies. Reports load plotly.js from cdnjs when opened in a browser.
 
 ## Wire and describe your radio
