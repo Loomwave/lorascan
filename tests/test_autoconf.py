@@ -112,6 +112,86 @@ def test_openhop_resolves_ch341_and_location(tmp_path):
     assert r.location == (34.1234, -84.5678, "openhop config gps.location")
 
 
+# --- SPI SX1262 openHOP radios (#7 follow-up): a radio_type:sx1262 node must resolve to a
+# spidev profile, even when a vestigial `ch341:` block remains from a former USB config. ---
+OH_SPI = """\
+ch341:                            # vestigial — the node moved to SPI, keep but IGNORE
+  pid: 21778
+  vid: 6790
+radio:
+  bandwidth: 62500
+  coding_rate: 5
+  frequency: 910525000.0
+  spreading_factor: 7
+  preamble_length: 32
+radio_type: sx1262
+sx1262:
+  bus_id: 0
+  busy_pin: 23
+  cs_id: 0
+  cs_pin: -1
+  dio3_tcxo_voltage: 1.8
+  irq_pin: 24
+  reset_pin: 22
+  rxen_pin: -1
+  txen_pin: -1
+  use_dio2_rf: true
+repeater:
+  latitude: 33.75008167
+  longitude: -84.39989167
+"""
+
+OH_SPI_UNSUPPORTED_TYPE = """\
+radio_type: kiss
+"""
+
+
+def test_openhop_radio_type_sx1262_resolves_to_spidev(tmp_path):
+    cfg = tmp_path / "config.yaml"; cfg.write_text(OH_SPI)
+    r = A.resolve_openhop(config=str(cfg))
+    p = r.profile
+    assert p.bus_type == "spidev" and p.bus_dev == "/dev/spidev0.0"     # bus_id 0, cs_id 0
+    assert p.pins == {"nss": "kernel", "reset": 22, "busy": 23, "dio1": 24, "rxen": None, "txen": None}
+    assert p.tcxo_v == 1.8 and p.dio2_rf_switch is True and p.max_tx_dbm == -9   # receive-only
+    assert r.usb is None and r.device == "/dev/spidev0.0" and r.service == "openhop-repeater.service"
+    # the vestigial ch341 block must NOT make it a USB radio / a fuser "usb" device
+    assert r.profile.bus_type == "spidev"
+    # repeater.{latitude,longitude} is used as the config-location fallback
+    assert r.location == (33.75008167, -84.39989167, "openhop repeater latitude/longitude")
+    # site-channel context surfaced as a note
+    assert any("910.525 MHz" in n for n in r.notes)
+
+
+def test_openhop_unsupported_radio_type_fails_loudly(tmp_path):
+    cfg = tmp_path / "config.yaml"; cfg.write_text(OH_SPI_UNSUPPORTED_TYPE)
+    with pytest.raises(A.AutoConfError) as e:
+        A.resolve_openhop(config=str(cfg))
+    assert "kiss" in str(e.value)
+
+
+def test_yamlmini_indentless_sequences_and_block_scalars():
+    # indentless sequence ('- key: value' at the SAME indent as its parent key) + block scalar
+    s = """\
+mqtt_brokers:
+  brokers:
+  - name: MeshMapper
+    host: mqtt.meshmapper.net
+    tls:
+      enabled: true
+  - name: LetsMesh
+    host: mqtt-us-v1.letsmesh.net
+repeater:
+  identity_key: !!binary |
+    CiOtvx9IKfJXXxMH+hLdo8JSn2OIbrsKZt5LOV3+66g=
+  rules: []
+"""
+    d = parse_yaml(s)
+    br = d["mqtt_brokers"]["brokers"]
+    assert len(br) == 2 and br[0]["name"] == "MeshMapper" and br[0]["tls"]["enabled"] is True and br[1]["host"] == "mqtt-us-v1.letsmesh.net"
+    assert "identity_key" in d["repeater"] and "CiOtvx9I" in d["repeater"]["identity_key"]
+    assert d["repeater"]["rules"] == []
+
+
 class Runner:
     """Fake systemctl/fuser: records calls; scripted answers."""
     def __init__(self, holders_after_stop=""):
