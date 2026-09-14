@@ -12,7 +12,7 @@ phase 1 (P1): energy layer, quick and survey scans, SQLite store, HTML report, s
 
 ```
 sudo apt install python3-spidev python3-libgpiod
-pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.8/lorascan-0.1.8-py3-none-any.whl
+pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.9/lorascan-0.1.9-py3-none-any.whl
 # or from a checkout of https://github.com/Loomwave/lorascan :  pip install .   (developer: pip install -e .)
 ```
 Issues and results: https://github.com/Loomwave/lorascan/issues
@@ -25,7 +25,7 @@ parts, runtime deps `python3-spidev` + `python3-libgpiod` (Recommends), `python3
 script is `lorascan = lorascan.cli:main`; profiles live inside the package (`lorascan/profiles/*.yaml`) and are
 overridable from `/etc/lorascan/profiles/` and `~/.config/lorascan/profiles/`. `pipx install <wheel>` is the
 clean per-user install on a Pi whose system Python is externally managed (PEP 668): `sudo apt install pipx`,
-then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.8/lorascan-0.1.8-py3-none-any.whl`
+then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.9/lorascan-0.1.9-py3-none-any.whl`
 (`--system-site-packages` so the apt-installed spidev/gpiod modules are visible).
 
 ## Wire and describe your radio
@@ -162,6 +162,14 @@ band's best floor costs as much as 100 % busy, so it cannot rank clean. That is 
 window is least hit" in one table; `floor_worst`, `floor_best`, `peak_max` are there to cross-check.
 `--from-share` renders the heat map at the share's granularity (hour or day), so a central host can draw a
 site's figures from the 3–53 KB/day it uploads instead of its database.
+
+## Flaky buses (USB sticks on towers)
+
+A transient bus error (pyusb `USBTimeoutError` / `USBError`, a spidev EIO) no longer ends a run: the scan
+closes the HAL, waits 1/2/4/8/16 s, resets the USB device on the second try, reopens and re-initialises the
+radio (re-uploading the scan patch if in use) and measures the interrupted visit again. After 5 consecutive
+failures it records `hal_giveup` and stops cleanly. `lorascan status` shows `hal_error` / `hal_recovered` /
+`hal_reopen_failed` counts per run.
 
 ## Calibration
 
