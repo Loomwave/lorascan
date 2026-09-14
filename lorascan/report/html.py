@@ -244,10 +244,10 @@ def render_from_data(d: dict, out_path: str, title: str = "lorascan report", slo
     if slot_hz:
         slots = slot_view(d["channels"], d.get("cad_rows", []), d.get("decodes", []), slot_hz)
         d["slots"] = slots
-        srows = "".join(f"<tr><td>{i+1}</td><td>{w['start_mhz']:.3f}–{w['end_mhz']:.3f}</td><td>{w['n_channels']}</td><td>{w['score']:.3f}</td><td>{w['busy_max']*100:.1f}</td><td>{w['floor_worst']:.0f}</td><td>{w['peak_max']:.0f}</td>"
+        srows = "".join(f"<tr><td>{i+1}</td><td>{w['start_mhz']:.3f}–{w['end_mhz']:.3f}</td><td>{w['n_channels']}</td><td>{w['score']:.3f}</td><td>{w['busy_max']*100:.1f}</td><td>{w['floor_worst']:.0f} (+{w['floor_penalty']:.2f})</td><td>{w['peak_max']:.0f}</td>"
                         f"<td>{w['cad_hit_max']*100:.1f}{(' SF%d' % w['cad_sf_max']) if w['cad_sf_max'] else ''}</td><td>{html.escape(w['decoded'])}</td><td>{html.escape(w['labels'])}</td></tr>" for i, w in enumerate(slots))
-        slot_html = (f"<h2>{slot_hz/1000:g} kHz slots, best first</h2><div class=\"note\">worst case of the channels inside each window: score = busiest channel's busy fraction + highest CAD hit rate + decoded frames / 10 (lower is better).</div>"
-                     "<table><thead><tr><th>rank</th><th>window MHz</th><th>ch</th><th>score</th><th>busy max %</th><th>floor worst dBm</th><th>peak dBm</th><th>CAD hit max %</th><th>decoded</th><th>who lives here</th></tr></thead><tbody>" + srows + "</tbody></table>")
+        slot_html = (f"<h2>{slot_hz/1000:g} kHz slots, best first</h2><div class=\"note\">worst case of the channels inside each window: score = busiest channel's busy fraction + highest CAD hit rate + decoded frames / 10 + (worst floor − best floor in the band) / 10 dB (lower is better; the floor term keeps a steady carrier from ranking clean).</div>"
+                     "<table><thead><tr><th>rank</th><th>window MHz</th><th>ch</th><th>score</th><th>busy max %</th><th>floor worst dBm (penalty)</th><th>peak dBm</th><th>CAD hit max %</th><th>decoded</th><th>who lives here</th></tr></thead><tbody>" + srows + "</tbody></table>")
     runs = ", ".join(f"#{r['id']} {r['kind']} ({r['profile']}) {_iso(r['first_ts']) if r['first_ts'] else '-'} → {_iso(r['last_ts']) if r['last_ts'] else '-'}" for r in d["runs"]) or "none"
     fa = d.get("cad_false_alarm")
     fa_note = (f"Reference false-alarm rate {fa['rate']*100:.1f} % from {fa['n_cad']} CADs at SF{fa['sf']} on the quietest channel ({fa['freq_hz']/1e6:.3f} MHz): hit rates near that value are noise, not LoRa." if fa else "")

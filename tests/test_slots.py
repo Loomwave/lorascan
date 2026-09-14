@@ -37,3 +37,14 @@ def test_cli_report_and_export_slot(tmp_path):
     assert cli.main(["export", "--db", db, "--csv", str(tmp_path / "slots.csv"), "--table", "slots", "--slot", "500000"]) == 0
     rows = list(csv.DictReader(open(str(tmp_path / "slots.csv"))))
     assert len(rows) == 2 and rows[0]["start_mhz"] == "903.000" and float(rows[-1]["busy_max"]) == 0.5   # empty windows are not listed
+
+
+def test_slot_score_weighs_worst_case_floor(tmp_path):
+    """#4 field note: a steady carrier (busy ~0, high floor) must not top the sort."""
+    chans = [
+        {"freq_hz": 902_000_000, "mhz": 902.0, "floor_med": -110, "p90_med": -100, "peak_max": -90, "busy_mean": 0.15, "n_rows": 5, "label": ""},
+        {"freq_hz": 902_600_000, "mhz": 902.6, "floor_med": -80, "p90_med": -78, "peak_max": -75, "busy_mean": 0.0, "n_rows": 5, "label": ""},   # carrier: 30 dB above the band's best floor
+    ]
+    slots = slot_view(chans, [], [], slot_hz=500_000)
+    assert [s["start_hz"] for s in slots] == [902_000_000, 902_500_000]
+    assert slots[0]["score"] == 0.15 and slots[1]["score"] == 3.0 and slots[1]["floor_penalty"] == 3.0     # (−80 − −110) / 10 dB

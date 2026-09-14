@@ -366,7 +366,7 @@ def cmd_export(a) -> int:
         from .report.slots import slot_view
         d = build_data(store, a.run)
         slots = slot_view(d["channels"], store.cad_summary(a.run), store.decode_summary(a.run), a.slot or 500_000)
-        cols = ["start_mhz", "end_mhz", "n_channels", "score", "busy_max", "busy_mean", "floor_worst", "floor_best", "peak_max", "cad_hit_max", "cad_sf_max", "decoded", "decoded_frames", "labels"]
+        cols = ["start_mhz", "end_mhz", "n_channels", "score", "busy_max", "busy_mean", "floor_worst", "floor_best", "floor_penalty", "peak_max", "cad_hit_max", "cad_sf_max", "decoded", "decoded_frames", "labels"]
         with open(a.csv, "w", newline="") as f:
             w = csv.writer(f); w.writerow(cols)
             for sl in slots:
@@ -419,6 +419,52 @@ def cmd_share(a) -> int:
 def _upload(doc: dict, to: str) -> int:
     r = upload_share(doc, to)
     print(f"[share] uploaded to {to}: sent {r['sent']} energy aggregates ({r['bytes']} bytes gzipped), skipped {r['skipped']} already at the endpoint (watermark {r['watermark']}), accepted {r.get('accepted')}, attempts {r['attempts']}")
+    return 0
+
+
+def cmd_syncfind(a) -> int:
+    """Loomwave/lorascan#5: sweep sync words at one PHY hypothesis and report the ones that decode."""
+    from .syncfind import parse_syncs, sync_find
+    prof = _profile(a.profile)
+    syncs = parse_syncs(a.syncs)
+    freq = int(round(a.freq * 1e6))
+    store = Store(a.db)
+    run_id = store.new_run("syncfind", prof.name, f"{a.freq} MHz sf{a.sf} bw{a.bw} cr{a.cr} {len(syncs)} syncs x {a.sync_dwell} s")
+    hal, radio = _open_radio(prof, freq)
+    fake = prof.bus_type == "fake"
+    if fake:
+        clk = [0.0]
+        hal.sleep = lambda s: clk.__setitem__(0, clk[0] + s)  # type: ignore[attr-defined]
+        clock = lambda: clk[0]
+    else:
+        clock = time.monotonic
+    print(f"[syncfind] {a.freq:.3f} MHz sf{a.sf}/bw{a.bw}/cr{a.cr}: {len(syncs)} sync words x {a.sync_dwell} s = {len(syncs) * a.sync_dwell / 60:.1f} min")
+    found = []
+    def progress(s, row):
+        store.add_decode(run_id, row)
+        if row.n_ok or row.n_crc_err:
+            found.append(row)
+            print(f"[syncfind] sync 0x{s:02X}: {row.n_ok} CRC-ok frames, {row.n_crc_err} header/CRC errors, rssi {row.rssi_med:.0f} dBm snr {row.snr_med:.1f}")
+        elif a.verbose:
+            print(f"[syncfind] sync 0x{s:02X}: nothing")
+    try:
+        sync_find(radio, freq, a.sf, a.bw, a.cr, syncs, a.sync_dwell, preamble=a.preamble, clock=clock, progress=progress)
+    finally:
+        try:
+            radio.standby()
+        except Exception:
+            pass
+        hal.close()
+        store.add_event(run_id, "stop", f"syncs={len(syncs)} found={len([r for r in found if r.n_ok])}")
+        store.close()
+    ok = sorted((r for r in found if r.n_ok), key=lambda r: -r.n_ok)
+    if ok:
+        print("[syncfind] FOUND: " + ", ".join(f"{r.network} ({r.n_ok} frames, {r.rssi_med:.0f} dBm)" for r in ok)
+              + f"  -> add to networks.yaml as  mynet/{ok[0].preset.replace('/', '-')}: {{sync: 0x{int(ok[0].network[5:], 16):02X}, sf: {a.sf}, bw: {a.bw}, cr: {a.cr}, freqs: {a.freq}}}")
+    else:
+        hdr = [r for r in found if r.n_crc_err]
+        print("[syncfind] found none with CRC-valid frames" + (f"; header/CRC errors only at {', '.join(r.network for r in hdr)} (right sync, wrong CR/SF/implicit header?)" if hdr else "")
+              + "; if CAD is hot here, try the other CRs (5-8), the neighbouring SF, or a longer --sync-dwell")
     return 0
 
 
@@ -498,6 +544,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--budget", default=None, help="bytes per day of survey, e.g. 20k/day: picks the coarsest document that fits")
     sp.add_argument("--to", default=None, help="upload endpoint, e.g. https://share.lorascan.app (gzip, incremental; omit to only write the file)")
     sp.set_defaults(fn=cmd_share)
+    sp = sub.add_parser("syncfind", help="sweep 8-bit sync words at one freq/SF/BW/CR and report the ones that decode (names an undocumented LoRa net)"); radio_args(sp)
+    sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--freq", type=float, required=True, help="MHz"); sp.add_argument("--sf", type=int, required=True); sp.add_argument("--bw", type=int, default=125)
+    sp.add_argument("--cr", type=int, default=5); sp.add_argument("--preamble", type=int, default=8); sp.add_argument("--syncs", default=None, help="e.g. 0x12,0x34 or 0x00-0x7F (default all 256)")
+    sp.add_argument("--sync-dwell", type=float, default=1.0, help="seconds per sync word"); sp.add_argument("--verbose", "-v", action="store_true"); sp.set_defaults(fn=cmd_syncfind)
     sp = sub.add_parser("upload", help="upload a share file written earlier (store-and-forward from any machine)")
     sp.add_argument("file"); sp.add_argument("--to", required=True); sp.set_defaults(fn=cmd_upload)
     return p
