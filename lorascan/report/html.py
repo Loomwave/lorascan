@@ -20,7 +20,19 @@ def _iso(ts: float) -> str:
     return dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def build_data(store, run_id=None, bucket_s: int = 60, rssi_offset_db: float = 0.0) -> dict:
+def auto_bucket_s(span_s: float, max_cols: int = 600) -> int:
+    """Smallest of 60 s, 2 min, 5 min, 10 min, 30 min, 1 h that keeps the heat map at <= max_cols columns."""
+    for b in (60, 120, 300, 600, 1800, 3600):
+        if span_s / b <= max_cols:
+            return b
+    return 3600
+
+
+def build_data(store, run_id=None, bucket_s: int | None = 60, rssi_offset_db: float = 0.0) -> dict:
+    if not bucket_s:
+        rs = [r for r in store.runs() if (run_id is None or r["id"] == run_id) and r["first_ts"]]
+        span = (max(r["last_ts"] for r in rs) - min(r["first_ts"] for r in rs)) if rs else 0.0
+        bucket_s = auto_bucket_s(span)
     chans = store.channel_summary(run_id)
     for c in chans:
         c["label"] = label_for(c["freq_hz"])
@@ -130,8 +142,9 @@ if(D.span_s>3600){{document.getElementById('when-wrap').hidden=false;Plotly.newP
 """
 
 
-def render_report(store, out_path: str, title: str = "lorascan report", run_id=None, bucket_s: int = 60, rssi_offset_db: float = 0.0) -> str:
+def render_report(store, out_path: str, title: str = "lorascan report", run_id=None, bucket_s: int | None = None, rssi_offset_db: float = 0.0) -> str:
     d = build_data(store, run_id, bucket_s, rssi_offset_db)
+    bucket_s = d["heat"]["bucket_s"]
     dec_of = {c["freq_hz"]: c.get("decoded", "") for c in d["channels"]}
     rows = "".join(
         f"<tr><td>{c['mhz']:.3f}</td><td>{html.escape(c['label'])}</td><td>{c['busy_mean']*100:.1f}</td><td>{c['floor_med']:.0f}</td><td>{c['p90_med']:.0f}</td><td>{c['peak_max']:.0f}</td><td>{c['n_rows']}</td><td>{html.escape(dec_of.get(c['freq_hz'], ''))}</td></tr>"

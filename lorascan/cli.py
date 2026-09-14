@@ -226,6 +226,23 @@ def _run_scan(a, kind: str) -> int:
     return 0
 
 
+def cmd_status(a) -> int:
+    store = Store(a.db)
+    now = time.time()
+    runs = store.runs()
+    if not runs:
+        print(f"[status] {a.db}: no runs")
+        return 0
+    for r in runs:
+        c = store.counts(r["id"]); ev = store.event_counts(r["id"])
+        last = max([x[1] for x in c.values() if x[1]] or [0])
+        age = f"{now - last:.0f} s" if last else "-"
+        state = "running" if "stop" not in ev else "finished"
+        print(f"[status] run #{r['id']} {r['kind']} ({r['profile']}) {state}: {c['energy'][0]} energy, {c['cad'][0]} cad, {c['decode'][0]} decode rows; "
+              f"last row {age} ago; events {ev}; note: {r['note']}")
+    return 0
+
+
 def cmd_report(a) -> int:
     store = Store(a.db)
     prof_offset = a.rssi_offset
@@ -313,8 +330,9 @@ def build_parser() -> argparse.ArgumentParser:
         if kind == "test":
             sp.set_defaults(dwell=30.0)
         sp.set_defaults(fn=lambda a, k=kind: _run_scan(a, k))
+    sp = sub.add_parser("status", help="runs, row counts and last-row age in a database"); sp.add_argument("--db", default="lorascan.db"); sp.set_defaults(fn=cmd_status)
     sp = sub.add_parser("report"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--out", default="lorascan-report.html"); sp.add_argument("--title", default="lorascan report")
-    sp.add_argument("--run", type=int, default=None); sp.add_argument("--bucket", type=int, default=60); sp.add_argument("--rssi-offset", type=float, default=None); sp.set_defaults(fn=cmd_report)
+    sp.add_argument("--run", type=int, default=None); sp.add_argument("--bucket", type=int, default=None, help="heat map bucket seconds (default: auto, <= 600 columns)"); sp.add_argument("--rssi-offset", type=float, default=None); sp.set_defaults(fn=cmd_report)
     sp = sub.add_parser("export"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--csv", required=True); sp.add_argument("--run", type=int, default=None); sp.set_defaults(fn=cmd_export)
     sp = sub.add_parser("share", help="write the opt-in community share file (aggregates + coarse cell; no upload yet)")
     sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--out", default="lorascan-share.json"); sp.add_argument("--run", type=int, default=None)

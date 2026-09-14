@@ -35,6 +35,10 @@ class Store:
         self.con.commit()
 
     def close(self) -> None:
+        try:
+            self.con.execute("PRAGMA wal_checkpoint(TRUNCATE)")   # leave a self-contained .db (users copy the file)
+        except sqlite3.Error:
+            pass
         self.con.close()
 
     def new_run(self, kind: str, profile: str, note: str = "", started_ts: float | None = None) -> int:
@@ -136,6 +140,15 @@ class Store:
         out = []
         for k in sorted(acc):
             d = acc[k]; r = sorted(d.pop("rssis")); d["rssi_med"] = r[len(r) // 2] if r else 0.0; d["rate_per_min"] = d["n_ok"] / d["dwell_s"] * 60 if d["dwell_s"] else 0.0; out.append(d)
+        return out
+
+    def event_counts(self, run_id: int) -> dict:
+        return {k: n for k, n in self.con.execute("SELECT kind, COUNT(*) FROM events WHERE run_id = ? GROUP BY kind", (run_id,))}
+
+    def counts(self, run_id: int) -> dict:
+        out = {}
+        for t in ("energy", "cad", "decode"):
+            out[t] = self.con.execute(f"SELECT COUNT(*), MAX(ts) FROM {t} WHERE run_id = ?", (run_id,)).fetchone()
         return out
 
     def runs(self) -> list[dict]:
