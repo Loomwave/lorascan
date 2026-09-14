@@ -11,6 +11,7 @@ from .profile import load_profile, BoardProfile
 from .hal import open_hal, HalError
 from .radio.sx126x import Sx126x, SxError, DeviceError
 from .measure.energy import polled_energy, EnergyRow
+from .radio.scanpatch import upload_patch, scan_energy, version_string, ScanError
 from .plan.grid import band_grid, KNOWN_CHANNELS, label_for
 from .plan.quick import quick_plan
 from .plan.survey import survey_plan
@@ -96,21 +97,40 @@ def _run_scan(a, kind: str) -> int:
         stopped["flag"] = True
     old = signal.signal(signal.SIGINT, _sig); old_t = signal.signal(signal.SIGTERM, _sig)
     n, failures = 0, 0
-    store.add_event(run_id, "start", f"{kind} grid={len(grid)} dwell={a.dwell}")
+    engine = a.engine
+    scan_failures = 0
+    if engine == "scan":
+        upload_patch(radio)
+        print(f"[scan] scan patch uploaded; chip version string {version_string(radio)!r}")
+    store.add_event(run_id, "start", f"{kind} grid={len(grid)} dwell={a.dwell} engine={engine}")
     try:
         for step in steps:
             if stopped["flag"] or (limit is not None and clock() - t_start >= limit):
                 break
+            ts = time.time() if not a.fake_clock else 1_700_000_000.0 + clock()
             try:
-                row = polled_energy(radio, step.freq_hz, step.bw_khz, step.dwell_s, clock=clock, sample_gap_s=a.sample_gap,
-                                    busy_t_db=a.busy_t, offset_dbm=prof.scan_offset_dbm,
-                                    ts=(time.time() if not a.fake_clock else 1_700_000_000.0 + clock()))
+                if engine == "scan":
+                    try:
+                        row = scan_energy(radio, step.freq_hz, step.bw_khz, nb_scan=a.nb_scan, offset_dbm=prof.scan_offset_dbm,
+                                          busy_t_db=a.busy_t, ts=ts, clock=clock)
+                    except ScanError as e:
+                        scan_failures += 1
+                        store.add_event(run_id, "scan_engine_error", f"{step.freq_hz} {e}")
+                        if scan_failures >= 2:
+                            print(f"[scan] WARNING: spectral-scan engine failed twice ({e}); falling back to the polled engine", file=sys.stderr)
+                            engine = "poll"
+                        continue
+                else:
+                    row = polled_energy(radio, step.freq_hz, step.bw_khz, step.dwell_s, clock=clock, sample_gap_s=a.sample_gap,
+                                        busy_t_db=a.busy_t, offset_dbm=prof.scan_offset_dbm, ts=ts)
             except SxError as e:
                 failures += 1
                 store.add_event(run_id, "radio_error", f"{step.freq_hz} {e}")
                 print(f"[scan] radio error at {step.freq_hz/1e6:.3f} MHz: {e}; re-initialising", file=sys.stderr)
                 try:
                     radio.init(step.freq_hz)
+                    if engine == "scan":
+                        upload_patch(radio)
                 except SxError as e2:
                     store.add_event(run_id, "radio_reinit_failed", str(e2))
                     print(f"[scan] re-init failed: {e2}; stopping", file=sys.stderr)
@@ -178,6 +198,8 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--start", type=int, default=902_000_000); sp.add_argument("--stop", type=int, default=928_000_000); sp.add_argument("--step", type=int, default=200_000)
         sp.add_argument("--bw", type=int, default=125, help="measurement bandwidth kHz (62/125/250/500)")
         sp.add_argument("--busy-t", type=float, default=8.0, help="busy threshold dB above floor")
+        sp.add_argument("--engine", choices=("poll", "scan"), default="poll", help="poll = host-polled GetRssiInst; scan = on-chip histogram (Semtech scan patch, experimental)")
+        sp.add_argument("--nb-scan", type=int, default=2048, help="samples per on-chip scan (engine=scan)")
         sp.add_argument("--duration", default=None, help="stop after e.g. 15m, 2h, 3d")
         sp.add_argument("--fake-clock", action="store_true", help=argparse.SUPPRESS)
         sp.add_argument("-v", "--verbose", action="store_true")

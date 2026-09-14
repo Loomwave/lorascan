@@ -27,3 +27,11 @@ def test_scan_survey_duration_limit(tmp_path):
     # fake clock: each step costs SETTLE_S (0.02) + dwell (0.002) = 0.022 s, so a 1 s limit yields about 45 rows
     n = len(list(Store(db).iter_energy()))
     assert rc == 0 and 35 <= n <= 50
+
+def test_engine_scan_falls_back_to_poll_on_the_fake_radio(tmp_path, capsys):
+    db = str(tmp_path / "s.db")
+    rc = cli.main(["scan", "quick", "--profile", "fake", "--db", db, "--passes", "1", "--dwell", "0.005", "--sample-gap", "0.001", "--engine", "scan"])
+    err = capsys.readouterr().err
+    assert rc == 0 and "falling back to the polled engine" in err
+    rows = list(Store(db).iter_energy())
+    assert rows and all(r.engine == "poll" for r in rows) and len(rows) == 144 - 2
