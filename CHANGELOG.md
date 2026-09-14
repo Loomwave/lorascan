@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.10 — 2026-09-14
+- `lorascan auto --from meshtasticd|openhop [--config] [--dry-run] [--to URL] -- <plan args>` (Loomwave/lorascan#7): resolves the profile from the daemon's own config (meshtasticd config.yaml + config.d board files, spidev or ch341; openHOP ch341 block), stops only the targeted unit, verifies the device is free, runs the plan, always restores and verifies the unit, then shares with the config's location if any. New dependency-free nested-YAML reader for those files.
+
 ## 0.1.9 — 2026-09-14
 - Bus-level recovery (Loomwave/lorascan#6): the CH341 backend wraps pyusb errors into `HalError`; the scan loop closes and reopens the HAL with 1/2/4/8/16 s backoff (USB device reset from the second attempt), re-initialises the radio, re-uploads the scan patch, and measures the interrupted visit again; gives up cleanly after 5 consecutive failures (`hal_giveup`). Events `hal_error` / `hal_recovered` / `hal_reopen_failed` per run.
 
