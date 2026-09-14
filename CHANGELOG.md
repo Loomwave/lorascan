@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.9 — 2026-09-14
+- Bus-level recovery (Loomwave/lorascan#6): the CH341 backend wraps pyusb errors into `HalError`; the scan loop closes and reopens the HAL with 1/2/4/8/16 s backoff (USB device reset from the second attempt), re-initialises the radio, re-uploads the scan patch, and measures the interrupted visit again; gives up cleanly after 5 consecutive failures (`hal_giveup`). Events `hal_error` / `hal_recovered` / `hal_reopen_failed` per run.
+
 ## 0.1.8 — 2026-09-14
 - `lorascan syncfind --freq --sf --bw [--cr] [--syncs] [--sync-dwell]`: sweeps the 8-bit sync words at one PHY hypothesis and reports the ones that decode (counts, RSSI, SNR) with a ready-made networks.yaml line; rows land in the decode table as `sync-0xNN`. (#5)
 - Slot score gains a worst-case-floor term, (floor_worst − best floor in the band) / 10 dB, so a steady carrier cannot rank as a clean window; `floor_penalty` column in the table and the CSV. (#4 field note)
