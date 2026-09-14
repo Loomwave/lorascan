@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 PROFILE_DIRS = [
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "profiles"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "profiles"),          # shipped with the package
     os.path.expanduser("~/.config/lorascan/profiles"),
     "/etc/lorascan/profiles",
 ]

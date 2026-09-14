@@ -20,7 +20,7 @@ No other Python dependencies. Reports load plotly.js from cdnjs when opened in a
 
 ## Wire and describe your radio
 
-Copy `profiles/generic-spidev.yaml`, set the GPIO line numbers your module uses (BUSY, DIO1, RESET,
+Copy `lorascan/profiles/generic-spidev.yaml` (`python3 -c "import lorascan.profile as p; print(p.PROFILE_DIRS[0])"` prints where the shipped profiles live after `pip install`), set the GPIO line numbers your module uses (BUSY, DIO1, RESET,
 optional RXEN/TXEN) and the SPI device. Keys and meaning: see spec §3.1. Pin numbers are gpiochip0 line
 offsets (BCM numbers on a Pi). Chip-select stays with the kernel (`nss: kernel`, use a CE pin).
 

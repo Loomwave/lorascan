@@ -22,4 +22,4 @@ lorascan = "lorascan.cli:main"
 include = ["lorascan*"]
 
 [tool.setuptools.package-data]
-lorascan = ["../profiles/*.yaml"]
+lorascan = ["profiles/*.yaml"]
