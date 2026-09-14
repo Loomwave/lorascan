@@ -12,7 +12,11 @@ class Step:
     freq_hz: int
     bw_khz: int
     dwell_s: float
-    layer: str = "energy"
+    layer: str = "energy"      # energy | cad | decode
+    sf: int = 0                # cad: spreading factor
+    cr: int = 5
+    network: str = ""          # decode: network + preset names (see lorascan.networks)
+    preset: str = ""
 
 
 def survey_plan(grid: list[int], dwell_s: float = 0.4, revisit_max_s: float = 600.0,

@@ -5,6 +5,8 @@ import sqlite3
 import time
 from typing import Iterator
 from ..measure.energy import EnergyRow
+from ..measure.cad import CadRow
+from ..measure.decode import DecodeRow
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (id INTEGER PRIMARY KEY, started_ts REAL NOT NULL, kind TEXT NOT NULL, profile TEXT NOT NULL, note TEXT NOT NULL DEFAULT '');
@@ -14,6 +16,12 @@ CREATE TABLE IF NOT EXISTS energy (
 CREATE INDEX IF NOT EXISTS energy_freq_ts ON energy(freq_hz, ts);
 CREATE INDEX IF NOT EXISTS energy_run ON energy(run_id);
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, run_id INTEGER, ts REAL NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS cad (id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, ts REAL NOT NULL, freq_hz INTEGER NOT NULL, bw_hz INTEGER NOT NULL, sf INTEGER NOT NULL,
+  symbols INTEGER NOT NULL, n_cad INTEGER NOT NULL, hits INTEGER NOT NULL, longest_run INTEGER NOT NULL, det_peak INTEGER NOT NULL, det_min INTEGER NOT NULL, timeouts INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS cad_freq_ts ON cad(freq_hz, ts);
+CREATE TABLE IF NOT EXISTS decode (id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, ts REAL NOT NULL, freq_hz INTEGER NOT NULL, network TEXT NOT NULL, preset TEXT NOT NULL,
+  dwell_s REAL NOT NULL, n_ok INTEGER NOT NULL, n_crc_err INTEGER NOT NULL, rssi_med REAL, snr_med REAL, len_med INTEGER);
+CREATE INDEX IF NOT EXISTS decode_freq_ts ON decode(freq_hz, ts);
 """
 
 
@@ -83,6 +91,52 @@ class Store:
             acc.setdefault(key, [0.0, 0.0, 0])
             acc[key][0] += bf; acc[key][1] += p90; acc[key][2] += 1
         return [{"bucket": k[0], "freq_hz": k[1], "busy_mean": v[0] / v[2], "p90_mean": v[1] / v[2], "n": v[2]} for k, v in sorted(acc.items())]
+
+    # ---- CAD --------------------------------------------------------------------------------
+    def add_cad(self, run_id: int, r: CadRow) -> None:
+        self.con.execute("INSERT INTO cad(run_id, ts, freq_hz, bw_hz, sf, symbols, n_cad, hits, longest_run, det_peak, det_min, timeouts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                         (run_id, r.ts, r.freq_hz, r.bw_hz, r.sf, r.symbols, r.n_cad, r.hits, r.longest_run, r.det_peak, r.det_min, r.timeouts))
+        self.con.commit()
+
+    def iter_cad(self, run_id: int | None = None, since: float | None = None) -> Iterator[CadRow]:
+        w, a = self._where(run_id, since)
+        for row in self.con.execute("SELECT ts, freq_hz, bw_hz, sf, symbols, n_cad, hits, longest_run, det_peak, det_min, timeouts FROM cad" + w + " ORDER BY ts", a):
+            yield CadRow(*row)
+
+    def cad_summary(self, run_id: int | None = None, since: float | None = None) -> list[dict]:
+        w, a = self._where(run_id, since)
+        acc: dict[tuple, dict] = {}
+        for f, sf, bw, n, h, lr in self.con.execute("SELECT freq_hz, sf, bw_hz, n_cad, hits, longest_run FROM cad" + w, a):
+            d = acc.setdefault((f, sf, bw), {"freq_hz": f, "sf": sf, "bw_hz": bw, "n_cad": 0, "hits": 0, "longest_run": 0, "n_rows": 0})
+            d["n_cad"] += n; d["hits"] += h; d["longest_run"] = max(d["longest_run"], lr); d["n_rows"] += 1
+        out = []
+        for k in sorted(acc):
+            d = acc[k]; d["hit_rate"] = d["hits"] / d["n_cad"] if d["n_cad"] else 0.0; out.append(d)
+        return out
+
+    # ---- decode -----------------------------------------------------------------------------
+    def add_decode(self, run_id: int, r: DecodeRow) -> None:
+        self.con.execute("INSERT INTO decode(run_id, ts, freq_hz, network, preset, dwell_s, n_ok, n_crc_err, rssi_med, snr_med, len_med) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                         (run_id, r.ts, r.freq_hz, r.network, r.preset, r.dwell_s, r.n_ok, r.n_crc_err, r.rssi_med, r.snr_med, r.len_med))
+        self.con.commit()
+
+    def iter_decode(self, run_id: int | None = None, since: float | None = None) -> Iterator[DecodeRow]:
+        w, a = self._where(run_id, since)
+        for row in self.con.execute("SELECT ts, freq_hz, network, preset, dwell_s, n_ok, n_crc_err, rssi_med, snr_med, len_med FROM decode" + w + " ORDER BY ts", a):
+            yield DecodeRow(*row)
+
+    def decode_summary(self, run_id: int | None = None, since: float | None = None) -> list[dict]:
+        w, a = self._where(run_id, since)
+        acc: dict[tuple, dict] = {}
+        for f, net, pre, dw, ok, bad, rssi in self.con.execute("SELECT freq_hz, network, preset, dwell_s, n_ok, n_crc_err, rssi_med FROM decode" + w, a):
+            d = acc.setdefault((f, net, pre), {"freq_hz": f, "network": net, "preset": pre, "dwell_s": 0.0, "n_ok": 0, "n_crc_err": 0, "rssis": []})
+            d["dwell_s"] += dw; d["n_ok"] += ok; d["n_crc_err"] += bad
+            if ok:
+                d["rssis"].append(rssi)
+        out = []
+        for k in sorted(acc):
+            d = acc[k]; r = sorted(d.pop("rssis")); d["rssi_med"] = r[len(r) // 2] if r else 0.0; d["rate_per_min"] = d["n_ok"] / d["dwell_s"] * 60 if d["dwell_s"] else 0.0; out.append(d)
+        return out
 
     def runs(self) -> list[dict]:
         out = []
