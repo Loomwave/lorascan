@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.5 — 2026-09-14
+- Static SVG heat map caps itself at 240 columns by merging adjacent time buckets (mean of measured cells; the axis label says how many were merged), so a multi-day survey report or `serve` page stays a few MB instead of growing without bound (a 19 h run at 60 s buckets was heading for ~10 MB).
+
 ## 0.1.4 — 2026-09-14
 - Community sharing for thin uplinks (share format `lorascan-share/2`): `share --granularity hour|day` (day adds the 7×24 when-matrix; ≈ 3 KB gzipped per day), `--budget 20k/day` picks the coarsest document that fits, `--to URL` uploads gzip JSON incrementally against the endpoint's watermark (idempotent rows, 5xx/network retries), and `lorascan upload FILE --to URL` sends a file written earlier from any machine. Endpoint protocol in docs/superpowers/specs/2026-09-14-lorascan-share-endpoint.md; share.lorascan.app deployment is a separate task.
 
