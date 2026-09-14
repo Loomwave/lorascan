@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.16 — 2026-09-14
+- Listening time is measured, not guessed: every energy row now stores its dwell (`dwell_s`; existing databases gain the column automatically), and the share document's `hours` sums it. 0.1.4–0.1.15 computed hours as samples × 8.2 µs, which is right for the on-chip scan engine and ~0 for the polled engine — a polled submitter's cell showed 0.0 h on the community map. Rows written before this release fall back to an estimate by engine.
+
 ## 0.1.15 — 2026-09-14
 - Basemap tile source is configurable: `--tiles-url` / `--tiles-attribution` or `LORASCAN_TILES_URL` / `LORASCAN_TILES_ATTRIBUTION` (default OpenStreetMap); `deploy/share-server/k8s.yaml` reads them from an optional Secret so a Carto key never lands in the manifest. The URL is embedded in the public page — restrict the key to the site's referrer at the provider.
 

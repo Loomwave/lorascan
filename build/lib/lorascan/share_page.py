@@ -102,6 +102,9 @@ table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font
 
 # Basemap as a progressive enhancement: Leaflet (cdnjs) + OpenStreetMap tiles, drawing the cells from
 # /v1/map.json; the inline SVG grid stays as the no-script / no-tiles view. Attribution per OSM policy.
+DEFAULT_TILES = {"url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                 "attribution": "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap contributors</a>"}
+
 _LEAFLET = """
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -113,7 +116,7 @@ _LEAFLET = """
     if(!m.cells.length){note.textContent='no located cells yet';return;}
     var el=document.getElementById('leaflet-map'); el.hidden=false;
     var map=L.map(el,{scrollWheelZoom:false});
-    var tiles=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'}).addTo(map);
+    var tiles=L.tileLayer(__TILES_URL__,{maxZoom:18,attribution:__TILES_ATTR__}).addTo(map);
     // keep the SVG grid until a real tile has rendered AND Leaflet's stylesheet applied; otherwise the box would be blank
     var shown=false;
     tiles.on('tileload',function(){if(shown)return;if(getComputedStyle(el).overflow!=='hidden'){note.textContent='basemap: tiles loaded but the Leaflet stylesheet did not; keeping the grid.';el.hidden=true;shown=true;return;}
@@ -132,7 +135,10 @@ _LEAFLET = """
 """
 
 
-def render_map_page(m: dict) -> str:
+def render_map_page(m: dict, tiles: dict | None = None) -> str:
+    import json as _json
+    tiles = tiles or DEFAULT_TILES
+    leaflet = _LEAFLET.replace("__TILES_URL__", _json.dumps(tiles["url"])).replace("__TILES_ATTR__", _json.dumps(tiles["attribution"]))
     e = html.escape
     head = f'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>lorascan community map</title><style>{_CSS}</style></head><body><main>'
     parts = [head, "<h1>lorascan community map — 902–928 MHz</h1>",
@@ -159,6 +165,6 @@ def render_map_page(m: dict) -> str:
         srows = "".join(f"<tr><td>{e(s['id'])}…{' (flagged)' if s['flagged'] else ''}</td><td>{e(str(s['board']))}</td><td>{e(str(s['tool']))}</td><td>{e(str(s['calibration']))}</td><td>{e(s['cell'])}</td><td>{s['uploads']}</td><td>{e(s['last_seen'])}</td></tr>" for s in m["submitter_rows"])
         parts.append('<h2>Submitters</h2><table><thead><tr><th>token</th><th>board</th><th>tool</th><th>levels</th><th>cell</th><th>uploads</th><th>last upload</th></tr></thead><tbody>' + srows + '</tbody></table>')
     if m["cells"]:
-        parts.append(_LEAFLET)
+        parts.append(leaflet)
     parts.append('<p class="note">Levels are relative unless a submitter calibrated; busy = samples more than 8 dB above that channel\'s floor. Data are per-channel aggregates only: no payloads, no precise positions.</p></main></body></html>')
     return "".join(parts)

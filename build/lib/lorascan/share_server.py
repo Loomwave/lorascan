@@ -138,8 +138,20 @@ def validate(doc, header_submitter: str) -> str | None:
     return None
 
 
-def make_share_server(host: str, port: int, db_path: str, max_gzip: int = 4_000_000, max_inflated: int = 64_000_000, rate_per_hour: int = 60):
+def tiles_config(url: str | None, attribution: str | None) -> dict:
+    """Basemap tile source for the map page: flags beat LORASCAN_TILES_URL / LORASCAN_TILES_ATTRIBUTION, which beat the
+    OpenStreetMap default. Whatever is in the URL (e.g. a Carto api_key) is visible to every visitor: restrict the key
+    to the site's referrer at the provider."""
+    import os
+    from .share_page import DEFAULT_TILES
+    u = url or os.environ.get("LORASCAN_TILES_URL") or DEFAULT_TILES["url"]
+    a = attribution or os.environ.get("LORASCAN_TILES_ATTRIBUTION") or (DEFAULT_TILES["attribution"] if u == DEFAULT_TILES["url"] else "map tiles: see provider")
+    return {"url": u, "attribution": a}
+
+
+def make_share_server(host: str, port: int, db_path: str, max_gzip: int = 4_000_000, max_inflated: int = 64_000_000, rate_per_hour: int = 60, tiles: dict | None = None):
     db = ShareDB(db_path)
+    tiles = tiles or tiles_config(None, None)
     rl = _RateLimit(rate_per_hour)
 
     class H(BaseHTTPRequestHandler):
@@ -160,7 +172,7 @@ def make_share_server(host: str, port: int, db_path: str, max_gzip: int = 4_000_
                 from .share_page import map_data, render_map_page
                 with db.lock:
                     m = map_data(db)
-                return self._send(200, render_map_page(m), "text/html; charset=utf-8")
+                return self._send(200, render_map_page(m, tiles), "text/html; charset=utf-8")
             if path == "/v1/map.json":
                 from .share_page import map_data
                 with db.lock:
@@ -219,8 +231,10 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="lorascan-share-server", description="lorascan community share endpoint (reference implementation)")
     p.add_argument("--host", default="0.0.0.0"); p.add_argument("--port", type=int, default=8081); p.add_argument("--db", default="/data/share.sqlite")
     p.add_argument("--max-gzip", type=int, default=4_000_000); p.add_argument("--max-inflated", type=int, default=64_000_000); p.add_argument("--rate-per-hour", type=int, default=60)
+    p.add_argument("--tiles-url", default=None, help="basemap tile URL template (default OpenStreetMap; env LORASCAN_TILES_URL), e.g. a Carto raster URL with api_key")
+    p.add_argument("--tiles-attribution", default=None, help="attribution HTML for the tiles (env LORASCAN_TILES_ATTRIBUTION)")
     a = p.parse_args(argv)
-    srv = make_share_server(a.host, a.port, a.db, a.max_gzip, a.max_inflated, a.rate_per_hour)
+    srv = make_share_server(a.host, a.port, a.db, a.max_gzip, a.max_inflated, a.rate_per_hour, tiles=tiles_config(a.tiles_url, a.tiles_attribution))
     print(f"[share-server] listening on {a.host}:{a.port}, db {a.db}", flush=True)
     try:
         srv.serve_forever()
