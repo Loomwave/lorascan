@@ -5,10 +5,14 @@ from .grid import KNOWN_CHANNELS
 from .survey import Step
 
 
-def quick_plan(grid: list[int], passes: int = 2, dwell_s: float = 0.4, bw_khz: int = 125,
+def quick_plan(grid: list[int], passes: int = 2, dwell_s: float = 0.4, bw_khz=125,
                known_dwell_s: float = 3.0) -> Iterator[Step]:
+    """bw_khz may be a list (Loomwave/lorascan#2): every width is measured back to back per channel."""
+    bws = list(bw_khz) if isinstance(bw_khz, (list, tuple)) else [bw_khz]
     for _ in range(passes):
         for f in grid:
-            yield Step(f, bw_khz, dwell_s)
+            for bw in bws:
+                yield Step(f, bw, dwell_s)
     for f, _label in KNOWN_CHANNELS:
-        yield Step(f, bw_khz, known_dwell_s)
+        for bw in bws:
+            yield Step(f, bw, known_dwell_s)
