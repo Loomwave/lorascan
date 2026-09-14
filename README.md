@@ -12,7 +12,7 @@ phase 1 (P1): energy layer, quick and survey scans, SQLite store, HTML report, s
 
 ```
 sudo apt install python3-spidev python3-libgpiod
-pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.7/lorascan-0.1.7-py3-none-any.whl
+pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.8/lorascan-0.1.8-py3-none-any.whl
 # or from a checkout of https://github.com/Loomwave/lorascan :  pip install .   (developer: pip install -e .)
 ```
 Issues and results: https://github.com/Loomwave/lorascan/issues
@@ -25,7 +25,7 @@ parts, runtime deps `python3-spidev` + `python3-libgpiod` (Recommends), `python3
 script is `lorascan = lorascan.cli:main`; profiles live inside the package (`lorascan/profiles/*.yaml`) and are
 overridable from `/etc/lorascan/profiles/` and `~/.config/lorascan/profiles/`. `pipx install <wheel>` is the
 clean per-user install on a Pi whose system Python is externally managed (PEP 668): `sudo apt install pipx`,
-then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.7/lorascan-0.1.7-py3-none-any.whl`
+then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.8/lorascan-0.1.8-py3-none-any.whl`
 (`--system-site-packages` so the apt-installed spidev/gpiod modules are visible).
 
 ## Wire and describe your radio
@@ -132,6 +132,23 @@ meshcore/us-narrow: {sync: 0x12, sf: 7, bw: 62, preamble: 32, freqs: 910.525 912
 User networks are appended to the built-in table; a user preset with a built-in network/preset name replaces it.
 `scan watch` and `test` decode against the merged table.
 
+### Naming an undocumented LoRa network (sync-word finder)
+
+```
+lorascan syncfind --profile my-board.yaml --db find.db --freq 915.0 --sf 9 --bw 125 --cr 5 --sync-dwell 1
+lorascan syncfind ... --syncs 0x00-0x7F          # half the space; 0x12,0x34,0x2B = a short list
+```
+CAD says "LoRa here" but decode names nothing when the sync word is not in the table. `syncfind` runs one
+decode dwell per 8-bit sync word at the PHY you name (256 × `--sync-dwell`, so 4 min at 1 s) and prints the
+sync words that yield CRC-valid frames, with counts, RSSI and SNR, plus a ready-made `networks.yaml` line.
+Header/CRC errors at one sync with no CRC-valid frames usually mean the right sync with the wrong CR or SF.
+Point it at a CAD-hot (frequency, SF, BW); rows land in the decode table as `sync-0xNN`.
+
+**CAD cross-SF desense (field note, #5):** a strong nearby transmitter (a 1 W MeshCore SF11/250 node in the
+same window) lights CAD at neighbouring SF/BW pairs too — in one tower dataset SF9/125 never fired without
+SF11/250 in the same 3 s window. Before hunting a sync word, check the SF map for a much stronger cell at
+another SF in the same window and the band summary for a peak near the top of the scale.
+
 ## Slot view, standalone SVGs, rendering from a share file
 
 ```
@@ -140,7 +157,9 @@ lorascan report --db survey.db --out r.html --svg figs/          # also writes f
 lorascan report --from-share site.json --out site.html --svg figs/   # no database needed: render what a site shared
 ```
 The slot table scores each window by its busiest channel's busy fraction + its highest CAD hit rate + decoded
-frames / 10 (lower is better), which is the question "which 500 kHz window is least hit by LoRa" in one table.
+frames / 10 + (worst floor − best floor in the band) / 10 dB (lower is better): a steady carrier 10 dB above the
+band's best floor costs as much as 100 % busy, so it cannot rank clean. That is the question "which 500 kHz
+window is least hit" in one table; `floor_worst`, `floor_best`, `peak_max` are there to cross-check.
 `--from-share` renders the heat map at the share's granularity (hour or day), so a central host can draw a
 site's figures from the 3–53 KB/day it uploads instead of its database.
 

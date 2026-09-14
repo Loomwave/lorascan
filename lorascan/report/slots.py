@@ -8,7 +8,9 @@ BAND_START_HZ = 902_000_000
 def slot_view(channels: list, cad: list, decodes: list, slot_hz: int = 500_000, start_hz: int = BAND_START_HZ) -> list:
     """channels/cad/decodes are the report's per-channel dicts (channel_summary, cad_summary, decode_summary
     or the share document's rows). Returns windows sorted best (quietest) first. score = busy_max +
-    cad_hit_max + decoded_frames/10, the candidate-card formula applied to the window's worst members."""
+    cad_hit_max + decoded_frames/10 + floor_penalty, where floor_penalty = (floor_worst - best floor in
+    the band) / 10 dB: the candidate-card formula on the window's worst members plus a worst-case-floor
+    term so a steady carrier is not ranked clean (Loomwave/lorascan#4 field note)."""
     win: dict[int, dict] = {}
     def key(f):
         return start_hz + ((f - start_hz) // slot_hz) * slot_hz
@@ -33,14 +35,19 @@ def slot_view(channels: list, cad: list, decodes: list, slot_hz: int = 500_000, 
             nm = f"{d['network']}/{d['preset']}"
             win[k]["dec"][nm] = win[k]["dec"].get(nm, 0) + d["n_ok"]
     out = []
+    band_floor = min((w["floor_best"] for w in win.values() if w["floor_best"] is not None), default=None)
     for k in sorted(win):
         w = win[k]
         frames = sum(w["dec"].values())
+        # worst-case floor penalty (#4 field note): 10 dB above the band's best floor costs 1.0, as much as 100 % busy,
+        # so a steady carrier (busy ~0, high floor) cannot top the sort
+        floor_pen = round(max(0.0, (w["floor_worst"] - band_floor) / 10.0), 4) if (band_floor is not None and w["floor_worst"] is not None) else 0.0
         out.append({"start_hz": w["start_hz"], "end_hz": w["end_hz"], "start_mhz": w["start_hz"] / 1e6, "end_mhz": w["end_hz"] / 1e6,
                     "n_channels": w["n_channels"], "floor_worst": w["floor_worst"], "floor_best": w["floor_best"], "peak_max": w["peak_max"],
                     "busy_max": round(w["busy_max"], 4), "busy_mean": round(w["busy_sum"] / w["n_channels"], 4),
                     "cad_hit_max": round(w["cad_hit_max"], 4), "cad_sf_max": w["cad_sf_max"],
                     "decoded": ", ".join(f"{n}:{c}" for n, c in sorted(w["dec"].items())), "decoded_frames": frames,
-                    "labels": ", ".join(sorted(w["labels"])), "score": round(w["busy_max"] + w["cad_hit_max"] + frames / 10, 4)})
+                    "labels": ", ".join(sorted(w["labels"])), "floor_penalty": floor_pen,
+                    "score": round(w["busy_max"] + w["cad_hit_max"] + frames / 10 + floor_pen, 4)})
     out.sort(key=lambda w: (w["score"], w["peak_max"] if w["peak_max"] is not None else 0, w["floor_worst"] if w["floor_worst"] is not None else 0))
     return out
