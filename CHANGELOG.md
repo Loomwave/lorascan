@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.15 — 2026-09-14
+- Basemap tile source is configurable: `--tiles-url` / `--tiles-attribution` or `LORASCAN_TILES_URL` / `LORASCAN_TILES_ATTRIBUTION` (default OpenStreetMap); `deploy/share-server/k8s.yaml` reads them from an optional Secret so a Carto key never lands in the manifest. The URL is embedded in the public page — restrict the key to the site's referrer at the provider.
+
 ## 0.1.14 — 2026-09-14
 - Community map page: OpenStreetMap basemap via Leaflet (cdnjs) as a progressive enhancement — cells drawn as coloured rectangles from `/v1/map.json` with popups (dashed = single submitter), OSM attribution; the inline SVG grid stays and is only hidden once a real tile has rendered with Leaflet's stylesheet applied, so a blocked CDN or tile server leaves the full data visible.
 
