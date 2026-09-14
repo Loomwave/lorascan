@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+build/
+*.egg-info/
+*.db
+*.db-wal
+*.db-shm
+*.html
+*.json
+!profiles/*.json
