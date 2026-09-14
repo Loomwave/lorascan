@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6 — 2026-09-14
+- LoRaWAN US915 decode covers all uplink data rates DR0–DR3 (SF10/9/8/7 @125 on the 64-channel raster) and DR4 (SF8 @500), plus downlinks DR8–DR13 (SF12…SF7 @500, inverted IQ, no PHY CRC: counted on RxDone with a valid header). Presets gain `invert_iq`. (Loomwave/lorascan#4, wehooper4)
+- `report --slot 500000` / `export --table slots --slot 500000`: N kHz window view over existing rows — worst floor, peak, busiest channel, highest CAD hit rate and SF, decoded networks per window, best first. (#2 item 3)
+- `report --from-share X.json` renders the report from a share document alone (no database), and `report --svg DIR` writes standalone heatmap/band/sfmap/when .svg files. (#3)
+
 ## 0.1.5 — 2026-09-14
 - Static SVG heat map caps itself at 240 columns by merging adjacent time buckets (mean of measured cells; the axis label says how many were merged), so a multi-day survey report or `serve` page stays a few MB instead of growing without bound (a 19 h run at 60 s buckets was heading for ~10 MB).
 
