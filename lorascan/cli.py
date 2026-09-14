@@ -24,6 +24,7 @@ from .plan.candidate import candidate_plan, parse_candidates
 from .measure.cad import cad_sweep
 from .measure.decode import decode_dwell
 from . import networks as netmod
+from .autoconf import AutoConfError
 from .networks import presets_on
 from .store.db import Store
 from .report.html import render_report
@@ -462,6 +463,53 @@ def _upload(doc: dict, to: str) -> int:
     return 0
 
 
+def cmd_auto(a) -> int:
+    """Loomwave/lorascan#7: read the daemon's radio config, hold it, scan, restore, share."""
+    from . import autoconf as A
+    from .profile import dump_profile
+    r = A.resolve(a.source, root=a.root, config=a.config)
+    tail = list(a.scan_args)
+    if tail and tail[0] == "--":
+        tail = tail[1:]
+    plan = tail[0] if tail and tail[0] in ("quick", "survey", "watch", "test") else "survey"
+    rest = tail[1:] if tail and tail[0] == plan else tail
+    prof_path = a.profile_out or os.path.join(os.path.expanduser("~/.config/lorascan/profiles"), f"{r.profile.name}.yaml")
+    dev = r.device
+    if r.usb and r.profile.bus_type == "ch341":
+        dev = A.usb_node(*r.usb) or ""
+    scan_argv = ["scan", plan, "--profile", prof_path] + rest
+    print(f"[auto] source: {r.source}")
+    print(f"[auto] radio: {r.profile.bus_type} {r.profile.bus_dev} pins {r.profile.pins}" + (f" usb {r.usb[0]:04x}:{r.usb[1]:04x}" if r.usb else "") + (f" (daemon max power {r.hint_max_power} dBm; lorascan never transmits)" if r.hint_max_power else ""))
+    print(f"[auto] would stop {r.service}, verify {dev or 'the USB device'} is free, run: lorascan {' '.join(scan_argv)}, then restore {r.service}")
+    if r.location:
+        print(f"[auto] location for the share: {r.location[0]:.4f},{r.location[1]:.4f} from {r.location[2]}")
+    else:
+        print("[auto] location for the share: none in the daemon's config (pass --cell lat,lon to share one)")
+    for n in r.notes:
+        print(f"[auto] note: {n}")
+    if a.dry_run:
+        print("[auto] dry run: nothing stopped, nothing written")
+        return 0
+    os.makedirs(os.path.dirname(prof_path), exist_ok=True)
+    with open(prof_path, "w") as f:
+        f.write(dump_profile(r.profile, f"auto-configured from {r.source} ({a.source}) by lorascan auto"))
+    print(f"[auto] wrote profile {prof_path}")
+    result = {"rc": 1}
+    def scan():
+        result["rc"] = main(scan_argv)
+        return result["rc"]
+    A.with_radio_held(r.service, dev or None, scan)
+    if result["rc"] != 0:
+        return result["rc"]
+    if a.to:
+        db = rest[rest.index("--db") + 1] if "--db" in rest else "lorascan.db"
+        cell = a.cell or (f"{r.location[0]},{r.location[1]}" if r.location else None)
+        share_argv = ["share", "--db", db, "--out", a.share_out, "--to", a.to] + (["--cell", cell] if cell else []) + ["--granularity", a.granularity]
+        print(f"[auto] sharing: lorascan {' '.join(share_argv)}" + (f" (location from {r.location[2]})" if cell and not a.cell and r.location else ""))
+        return main(share_argv)
+    return 0
+
+
 def cmd_syncfind(a) -> int:
     """Loomwave/lorascan#5: sweep sync words at one PHY hypothesis and report the ones that decode."""
     from .syncfind import parse_syncs, sync_find
@@ -584,6 +632,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--budget", default=None, help="bytes per day of survey, e.g. 20k/day: picks the coarsest document that fits")
     sp.add_argument("--to", default=None, help="upload endpoint, e.g. https://share.lorascan.app (gzip, incremental; omit to only write the file)")
     sp.set_defaults(fn=cmd_share)
+    sp = sub.add_parser("auto", help="configure from a running meshtasticd / openHOP daemon: read its radio config, stop that unit, scan, restore it, share")
+    sp.add_argument("--from", dest="source", required=True, choices=("meshtasticd", "openhop")); sp.add_argument("--config", default=None, help="the daemon config to use (a config.d board file for meshtasticd; required when several boards are active)")
+    sp.add_argument("--root", default=None, help=argparse.SUPPRESS); sp.add_argument("--dry-run", action="store_true", help="print the resolved profile, the scan command and the unit that would be stopped; touch nothing")
+    sp.add_argument("--profile-out", default=None, help="where to write the resolved profile (default ~/.config/lorascan/profiles/<name>.yaml)")
+    sp.add_argument("--to", default=None, help="share endpoint to upload to after the scan"); sp.add_argument("--cell", default=None, help="lat,lon for the share (default: the daemon's config location if any)")
+    sp.add_argument("--granularity", choices=("hour", "day"), default="day"); sp.add_argument("--share-out", default="lorascan-share.json")
+    sp.add_argument("scan_args", nargs=argparse.REMAINDER, help="-- then the plan and its options, e.g. -- survey --db x.db --duration 2h --cad-grid 500000")
+    sp.set_defaults(fn=cmd_auto)
     sp = sub.add_parser("syncfind", help="sweep 8-bit sync words at one freq/SF/BW/CR and report the ones that decode (names an undocumented LoRa net)"); radio_args(sp)
     sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--freq", type=float, required=True, help="MHz"); sp.add_argument("--sf", type=int, required=True); sp.add_argument("--bw", type=int, default=125)
     sp.add_argument("--cr", type=int, default=5); sp.add_argument("--preamble", type=int, default=8); sp.add_argument("--syncs", default=None, help="e.g. 0x12,0x34 or 0x00-0x7F (default all 256)")
@@ -597,7 +653,7 @@ def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
     try:
         return int(a.fn(a))
-    except (HalError, DeviceBusy, DeviceError, SxError, FileNotFoundError, ValueError, RuntimeError) as e:
+    except (HalError, DeviceBusy, DeviceError, SxError, FileNotFoundError, ValueError, RuntimeError, AutoConfError) as e:
         print(f"lorascan: {e}", file=sys.stderr)
         return 1
 
