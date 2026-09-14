@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.11 — 2026-09-14
+- Reference share endpoint `lorascan-share-server` (stdlib + SQLite): `/healthz`, `/v1/watermark`, `/v1/share` (gzip JSON, idempotent upserts keyed per the spec, newest `generated` wins), `/v1/stats`; 4 MB gzip / 64 MB inflated / 60 POST per hour per submitter; miscalibrated documents stored `flagged = 1`. Tests drive it with the real `lorascan share --to` client. Deployment kit in `deploy/share-server/` (Dockerfile, k8s.yaml for share.lorascan.app, systemd unit, handover README).
+
 ## 0.1.10 — 2026-09-14
 - `lorascan auto --from meshtasticd|openhop [--config] [--dry-run] [--to URL] -- <plan args>` (Loomwave/lorascan#7): resolves the profile from the daemon's own config (meshtasticd config.yaml + config.d board files, spidev or ch341; openHOP ch341 block), stops only the targeted unit, verifies the device is free, runs the plan, always restores and verifies the unit, then shares with the config's location if any. New dependency-free nested-YAML reader for those files.
 
