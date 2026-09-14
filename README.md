@@ -39,6 +39,21 @@ Options: `--start/--stop/--step` (Hz; default 902.0–928.0 MHz every 200 kHz), 
 bandwidth kHz (125 default), `--dwell` seconds per visit, `--busy-t` dB above the floor that counts
 as busy (8), `--revisit` maximum seconds between visits of any channel in survey mode (600).
 
+## LoRa layers: CAD, decode, watch, candidates
+
+```
+lorascan scan quick  --profile P --db lorascan.db --cad                 # + CAD sweeps (SF7/9/11 x BW125/250) on hot and known channels
+lorascan scan watch  --profile P --db lorascan.db --freqs 906.875,910.525,911.5 --sfs 7,9,11 --bws 125,250 --dwell 2 --decode-dwell 10
+lorascan test        --profile P --db lorascan.db --candidates 905.0/9/125,921.0/11/250/8 --dwell 60
+```
+Channel Activity Detection is the LoRa-specific detector: it correlates against LoRa chirps at one
+spreading factor and bandwidth, so a sweep over SFs maps which LoRa families occupy a channel (the
+report's "LoRa presence by spreading factor"). The decode layer tunes to each known network's exact
+PHY on that frequency (Meshtastic presets and frequency slots, LoRaWAN US915 channels, MeshCore,
+Loomwave; `lorascan/networks.py`) and counts CRC-valid frames with their RSSI and SNR — payload bytes
+are drained and discarded, never stored. `test` ranks candidates by busy fraction + CAD hit rate +
+decoded frames per minute, all measured passively at exactly the candidate's settings.
+
 ## What the numbers mean
 
 Per channel visit the tool stores every RSSI sample's 33-level histogram (4 dB levels, the Semtech
@@ -73,6 +88,10 @@ scan falls back to polling and says so.
   the same HAT the same hour, floors agreed to +0.5 dB mean (−7…+8 dB spread over 14 channels); the
   reference disagreed with itself by up to 9 dB between two back-to-back runs on that bench, so a
   quiet-site or long-dwell comparison is still owed before absolute agreement is claimed.
+- Same bench, 13:22–13:25Z: `scan watch` on 906.875 / 910.525 / 911.5 / 913.125 MHz — CAD hits at
+  SF9 and SF11 on the busy channels (e.g. 910.525 SF11/BW250 11 of 50, 906.875 SF9/BW125 8 of 50,
+  SF7 0 of 50 everywhere), one CRC-valid MeshCore us-narrow frame decoded on 910.525 (−33 dBm,
+  SNR 12), seven Loomwave fleet frames on 911.5 (SNR 11).
 
 ## Licence
 
