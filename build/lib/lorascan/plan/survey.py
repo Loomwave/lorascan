@@ -1,0 +1,53 @@
+"""survey plan (spec §3.3): endless round-robin with adaptive revisiting. Each round visits every
+channel whose last visit is older than revisit_max_s, plus the most active channels (top 10 % by
+the caller-maintained `activity` map, e.g. busy_frac). No channel waits longer than revisit_max_s."""
+from __future__ import annotations
+import time
+from dataclasses import dataclass
+from typing import Iterator, Callable
+
+
+@dataclass(frozen=True)
+class Step:
+    freq_hz: int
+    bw_khz: int
+    dwell_s: float
+    layer: str = "energy"      # energy | cad | decode
+    sf: int = 0                # cad: spreading factor
+    cr: int = 5
+    network: str = ""          # decode: network + preset names (see lorascan.networks)
+    preset: str = ""
+
+
+def survey_plan(grid: list[int], dwell_s: float = 0.4, revisit_max_s: float = 600.0,
+                activity: dict[int, float] | None = None, bw_khz=125,
+                clock: Callable[[], float] = time.monotonic) -> Iterator[Step]:
+    """bw_khz may be a list (Loomwave/lorascan#2): every width is measured back to back per visit."""
+    bws = list(bw_khz) if isinstance(bw_khz, (list, tuple)) else [bw_khz]
+    activity = activity if activity is not None else {}
+    last: dict[int, float] = {}
+    n_hot = max(1, len(grid) // 10)
+    while True:
+        now = clock()
+        due = [f for f in grid if now - last.get(f, -1e18) >= revisit_max_s]
+        if not due:
+            # nothing is due: revisit the oldest tenth so time-resolution is spent, not wasted
+            due = sorted(grid, key=lambda f: last.get(f, -1e18))[: n_hot]
+        hot = sorted((f for f in grid if activity.get(f, 0.0) > 0.0), key=lambda f: -activity[f])[: n_hot]
+        # interleave the hot channels through the round so they get time resolution, capped so they
+        # never take more than a third of the steps
+        stride = max(8, 2 * len(hot))
+        for i, f in enumerate(due):
+            for bw in bws:
+                yield Step(f, bw, dwell_s)
+            last[f] = clock()
+            if hot and (i + 1) % stride == 0:
+                for h in hot:
+                    for bw in bws:
+                        yield Step(h, bw, dwell_s)
+                    last[h] = clock()
+        for h in hot:
+            if h not in due:
+                for bw in bws:
+                    yield Step(h, bw, dwell_s)
+                last[h] = clock()

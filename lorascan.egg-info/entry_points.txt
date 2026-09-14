@@ -1,0 +1,3 @@
+[console_scripts]
+lorascan = lorascan.cli:main
+lorascan-share-server = lorascan.share_server:main

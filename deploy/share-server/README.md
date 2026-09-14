@@ -2,12 +2,12 @@
 
 Handover for the cluster operator. The service is `lorascan-share-server` from the lorascan wheel
 (reference implementation of `docs/superpowers/specs/2026-09-14-lorascan-share-endpoint.md` in the Loomwave
-repo): stdlib Python, one process, SQLite in `/data/share.sqlite`, routes `GET /healthz`, `GET /v1/watermark`,
-`POST /v1/share`, `GET /v1/stats`. It has no TLS of its own: terminate TLS at the ingress.
+repo): stdlib Python, one process, SQLite in `/data/share.sqlite`, routes `GET /` (the community map page, inline SVG, no JS/CDN), `GET /v1/map.json`,
+`GET /healthz`, `GET /v1/watermark`, `POST /v1/share`, `GET /v1/stats`. It has no TLS of its own: terminate TLS at the ingress.
 
 ## Steps
 1. Build and push the image from the lorascan repo root (tag = the lorascan version):
-   `docker build -f deploy/share-server/Dockerfile -t REGISTRY/lorascan-share-server:0.1.11 . && docker push …`
+   `docker build -f deploy/share-server/Dockerfile -t REGISTRY/lorascan-share-server:0.1.13 . && docker push …` (retag + rollout for each lorascan release that touches the server)
 2. Edit `k8s.yaml`: image reference, `ingressClassName`, the cert-manager issuer. Point DNS `share.lorascan.app`
    at the ingress. `kubectl apply -f deploy/share-server/k8s.yaml`.
 3. Verify: `curl -s https://share.lorascan.app/healthz` → `ok`; `curl -s https://share.lorascan.app/v1/stats` → JSON counts;

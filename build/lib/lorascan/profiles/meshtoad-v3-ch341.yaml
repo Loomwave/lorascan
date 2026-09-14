@@ -1,0 +1,9 @@
+# MeshToad V3 / PineDio-USB class stick: bare SX1262 + E22P 30 dBm FEM behind a CH341 in SPI mode
+# (USB 1a86:5512). Pins are CH341 D-line numbers (meshtastic lora-usb-meshtoad-e22.yaml): CS D0,
+# RXEN D1, RESET D2, BUSY D4, DIO1 D6; DIO2 drives the RF switch, TCXO 1.8 V on DIO3. bus.dev = the
+# stick's USB serial number to pick one of several, or auto. EXPERIMENTAL: not yet run against a stick.
+name: meshtoad-v3-ch341
+bus: {type: ch341, dev: auto, hz: 0}
+pins: {nss: 0, reset: 2, busy: 4, dio1: 6, rxen: 1, txen: null}
+radio: {tcxo_v: 1.8, dio2_rf_switch: true, rx_boosted: true, max_tx_dbm: -9}
+cal:   {rssi_offset_db: 0.0, scan_offset_dbm: -11}

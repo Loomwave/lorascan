@@ -1,0 +1,7 @@
+# Generic SX1262 module on a Linux SPI bus. Edit the pin numbers (gpiochip0 line numbers) to match
+# your wiring; set rxen/txen if your module has FEM enable pins driven by the host.
+name: generic-spidev
+bus: {type: spidev, dev: /dev/spidev0.0, hz: 2000000}
+pins: {nss: kernel, reset: 22, busy: 23, dio1: 24, rxen: null, txen: null}
+radio: {tcxo_v: 1.8, dio2_rf_switch: true, rx_boosted: true, max_tx_dbm: -9}
+cal:   {rssi_offset_db: 0.0, scan_offset_dbm: -11}

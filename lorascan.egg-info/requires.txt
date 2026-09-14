@@ -1,0 +1,10 @@
+
+[dev]
+pytest>=7
+
+[mqtt]
+paho-mqtt>=1.6
+
+[spidev]
+spidev>=3.5
+gpiod>=1.6
