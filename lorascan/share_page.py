@@ -100,6 +100,38 @@ table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font
 """
 
 
+# Basemap as a progressive enhancement: Leaflet (cdnjs) + OpenStreetMap tiles, drawing the cells from
+# /v1/map.json; the inline SVG grid stays as the no-script / no-tiles view. Attribution per OSM policy.
+_LEAFLET = """
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(function(){
+  var note=document.getElementById('basemap-note');
+  if(typeof L==='undefined'){note.textContent='basemap unavailable: Leaflet did not load from cdnjs (offline or blocked); the grid above is the full data.';return;}
+  fetch('/v1/map.json').then(function(r){return r.json();}).then(function(m){
+    if(!m.cells.length){note.textContent='no located cells yet';return;}
+    var el=document.getElementById('leaflet-map'); el.hidden=false;
+    var map=L.map(el,{scrollWheelZoom:false});
+    var tiles=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'}).addTo(map);
+    // keep the SVG grid until a real tile has rendered AND Leaflet's stylesheet applied; otherwise the box would be blank
+    var shown=false;
+    tiles.on('tileload',function(){if(shown)return;if(getComputedStyle(el).overflow!=='hidden'){note.textContent='basemap: tiles loaded but the Leaflet stylesheet did not; keeping the grid.';el.hidden=true;shown=true;return;}
+      shown=true;document.getElementById('cells-static').hidden=true;note.textContent='basemap: OpenStreetMap tiles via Leaflet 1.9.4; colour = mean busy fraction, dashed = single submitter; click a cell.';});
+    tiles.on('tileerror',function(){if(!shown){note.textContent='basemap: OpenStreetMap tiles did not load (offline or blocked); the grid above is the full data.';el.hidden=true;shown=true;}});
+    var stops=[[0,[255,255,204]],[0.25,[254,217,118]],[0.5,[253,141,60]],[0.75,[227,26,28]],[1,[128,0,38]]];
+    function col(v){if(v==null)return '#C9CFD6';v=Math.max(0,Math.min(1,v));for(var i=1;i<stops.length;i++){if(v<=stops[i][0]){var t=(v-stops[i-1][0])/(stops[i][0]-stops[i-1][0]),a=stops[i-1][1],b=stops[i][1];return 'rgb('+Math.round(a[0]+(b[0]-a[0])*t)+','+Math.round(a[1]+(b[1]-a[1])*t)+','+Math.round(a[2]+(b[2]-a[2])*t)+')';}}return '#800026';}
+    var bounds=[];
+    m.cells.forEach(function(c){var s=c.size_deg||0.1,b=[[c.lat-s/2,c.lon-s/2],[c.lat+s/2,c.lon+s/2]];bounds.push(b[0],b[1]);
+      var r=L.rectangle(b,{color:'#1B2430',weight:1,fillColor:col(c.busy_mean),fillOpacity:c.submitters<2?0.45:0.75,dashArray:c.submitters<2?'4 3':null}).addTo(map);
+      r.bindPopup('<b>'+c.lat.toFixed(1)+', '+c.lon.toFixed(1)+'</b><br>'+c.submitters+' submitter(s), '+c.hours.toFixed(1)+' h, busy '+(c.busy_mean==null?'?':(c.busy_mean*100).toFixed(1)+' %')+'<br>quietest: '+c.quietest.slice(0,3).map(function(q){return q.mhz.toFixed(1)+' ('+(q.busy*100).toFixed(0)+' %)';}).join(', ')+'<br>busiest: '+c.busiest.slice(0,3).map(function(q){return q.mhz.toFixed(1)+' ('+(q.busy*100).toFixed(0)+' %)';}).join(', '));});
+    map.fitBounds(bounds,{padding:[30,30],maxZoom:11});
+  }).catch(function(e){note.textContent='basemap: could not load /v1/map.json ('+e+'); the grid above is the full data.';});
+})();
+</script>
+"""
+
+
 def render_map_page(m: dict) -> str:
     e = html.escape
     head = f'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>lorascan community map</title><style>{_CSS}</style></head><body><main>'
@@ -111,7 +143,8 @@ def render_map_page(m: dict) -> str:
         parts.append('<p class="note">no uploads yet — run <code>lorascan share --db your.db --cell lat,lon --to https://share.lorascan.app</code> after a survey.</p>')
     else:
         parts.append('<h2>Where</h2><div class="note">each square is a 0.1° cell (about 10 km) that at least one scanner has shared; single-submitter cells are hatched. Uploads without a location count in the band summary but not on the map.</div>')
-        parts.append('<div class="fig">' + (cells_svg(m["cells"]) or '<p class="note">no cells with a location yet</p>') + '</div>')
+        parts.append('<div class="fig"><div id="cells-static">' + (cells_svg(m["cells"]) or '<p class="note">no cells with a location yet</p>') + '</div>'
+                     '<div id="leaflet-map" style="height:480px" hidden></div><div id="basemap-note" class="note">basemap: loading OpenStreetMap tiles via Leaflet… (the grid above is the no-script view)</div></div>')
         parts.append('<h2>Band summary, all submitters</h2><div class="note">bar = median floor to maximum peak across submitters; colour = mean busy fraction; label = who is known to live there.</div>')
         parts.append('<div class="fig">' + band_svg(m["band"]) + '</div>')
         rows = "".join(f"<tr><td>{c['mhz']:.3f}</td><td>{e(c['label'])}</td><td>{c['busy_mean'] * 100:.1f}</td><td>{c['floor_med']:.0f}</td><td>{c['peak_max']:.0f}</td><td>{c['n_submitters']}</td><td>{c['hours']:.1f}</td></tr>"
@@ -125,5 +158,7 @@ def render_map_page(m: dict) -> str:
             parts.append('<h2>Cells</h2><table><thead><tr><th>cell</th><th>submitters</th><th>hours</th><th>busy %</th><th>quietest MHz</th><th>busiest MHz</th></tr></thead><tbody>' + crows + '</tbody></table>')
         srows = "".join(f"<tr><td>{e(s['id'])}…{' (flagged)' if s['flagged'] else ''}</td><td>{e(str(s['board']))}</td><td>{e(str(s['tool']))}</td><td>{e(str(s['calibration']))}</td><td>{e(s['cell'])}</td><td>{s['uploads']}</td><td>{e(s['last_seen'])}</td></tr>" for s in m["submitter_rows"])
         parts.append('<h2>Submitters</h2><table><thead><tr><th>token</th><th>board</th><th>tool</th><th>levels</th><th>cell</th><th>uploads</th><th>last upload</th></tr></thead><tbody>' + srows + '</tbody></table>')
+    if m["cells"]:
+        parts.append(_LEAFLET)
     parts.append('<p class="note">Levels are relative unless a submitter calibrated; busy = samples more than 8 dB above that channel\'s floor. Data are per-channel aggregates only: no payloads, no precise positions.</p></main></body></html>')
     return "".join(parts)

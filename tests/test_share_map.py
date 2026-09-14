@@ -50,7 +50,11 @@ def test_root_page_is_selfcontained_html_with_the_map(fleet):
     st, ct, html = _get(fleet, "/")
     assert st == 200 and "text/html" in ct
     assert "<svg" in html and "34.1" in html and "-84.4" in html and "openstreetmap.org" in html
-    assert "single submitter" in html and "flagged" in html and "cdnjs" not in html and "<script" not in html
+    assert "single submitter" in html and "flagged" in html
+    # basemap = progressive enhancement: Leaflet from cdnjs + OSM tiles with attribution, the inline SVG stays as the fallback
+    assert "cdnjs.cloudflare.com/ajax/libs/leaflet/" in html and "tile.openstreetmap.org" in html and "OpenStreetMap contributors" in html
+    assert 'id="leaflet-map"' in html and "typeof L" in html and html.index("<svg") < html.index("<script")
+    assert "tileload" in html                                     # the SVG grid is hidden only once a real tile has rendered
     assert "911.5" in html and "Loomwave fleet" in html and "nebra-duo-hat" in html
 
 
