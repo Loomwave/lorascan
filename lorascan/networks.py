@@ -7,6 +7,9 @@ SF7/BW62.5/CR5 (sync word NOT confirmed from source: RadioLib default 0x12 assum
 911.5 MHz SF9/BW125 private sync."""
 from __future__ import annotations
 from dataclasses import dataclass, field
+import json
+import os
+from .profile import parse_mini_yaml
 
 
 @dataclass(frozen=True)
@@ -77,7 +80,69 @@ LOOMWAVE = Network("loomwave", 0x12, (
     Preset("bench-cell", 9, 125, 5, preamble=16, freqs_hz=(905_000_000,)),
 ), "private sync 0x12")
 
-NETWORKS: list[Network] = [MESHTASTIC, LORAWAN_US915, MESHCORE, LOOMWAVE]
+BUILTIN_NETWORKS: list[Network] = [MESHTASTIC, LORAWAN_US915, MESHCORE, LOOMWAVE]
+NETWORKS: list[Network] = list(BUILTIN_NETWORKS)      # the active table; set_networks() replaces it (user table, #2 item 4)
+USER_NETWORK_PATHS = [os.path.expanduser("~/.config/lorascan/networks.yaml"), "/etc/lorascan/networks.yaml"]
+
+
+def set_networks(nets: list) -> None:
+    NETWORKS[:] = list(nets)
+
+
+def _int(v) -> int:
+    return int(v, 0) if isinstance(v, str) else int(v)
+
+
+def load_user_networks(path: str) -> list[Network]:
+    """User network table (Loomwave/lorascan#2 item 4). One preset per line:
+        network/preset: {sync: 0x12, sf: 9, bw: 125, cr: 5, preamble: 16, crc: true, iq: false, freqs: 905.0 906.5}
+    freqs are MHz, space separated; cr/preamble/crc/iq default to 5/8/true/false. A .json file with the
+    same keys ({"network/preset": {...}}) is accepted too. Presets of one network share its sync word."""
+    if path.endswith(".json"):
+        with open(path) as f:
+            d = json.load(f)
+    else:
+        with open(path) as f:
+            d = parse_mini_yaml(f.read())
+    nets: dict[str, dict] = {}
+    for key, v in d.items():
+        if "/" not in key or not isinstance(v, dict):
+            raise ValueError(f"{path}: expected 'network/preset: {{...}}', got {key!r}")
+        nname, pname = key.split("/", 1)
+        sync = _int(v.get("sync", 0x12))
+        freqs = v.get("freqs", "")
+        freqs = [freqs] if isinstance(freqs, (int, float)) else [float(x) for x in str(freqs).split()]
+        p = Preset(pname.strip(), _int(v["sf"]), _int(v["bw"]), _int(v.get("cr", 5)), preamble=_int(v.get("preamble", 8)),
+                   crc_on=str(v.get("crc", "true")).lower() not in ("false", "0", "no"), invert_iq=str(v.get("iq", "false")).lower() in ("true", "1", "yes"),
+                   freqs_hz=tuple(int(round(f * 1e6)) for f in freqs))
+        n = nets.setdefault(nname.strip(), {"sync": sync, "presets": []})
+        if n["sync"] != sync:
+            raise ValueError(f"{path}: network {nname} has two sync words")
+        n["presets"].append(p)
+    return [Network(name, n["sync"], tuple(n["presets"]), f"user table {path}") for name, n in nets.items()]
+
+
+def merge_networks(builtin: list, user: list) -> list:
+    """User networks are appended; a user preset with a built-in (network, preset) name REPLACES it."""
+    out = []
+    user_by = {u.name: u for u in user}
+    for b in builtin:
+        if b.name in user_by:
+            u = user_by[b.name]
+            ups = {p.name: p for p in u.presets}
+            presets = tuple(ups.pop(p.name, p) for p in b.presets) + tuple(ups.values())
+            out.append(Network(b.name, u.sync_word, presets, b.note + "; " + u.note))
+        else:
+            out.append(b)
+    out += [u for u in user if u.name not in {b.name for b in builtin}]
+    return out
+
+
+def load_default_user_networks() -> list[Network]:
+    for p in USER_NETWORK_PATHS:
+        if os.path.exists(p):
+            return load_user_networks(p)
+    return []
 
 
 def sync_word_regs(word8: int) -> tuple[int, int]:

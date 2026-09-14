@@ -12,7 +12,7 @@ phase 1 (P1): energy layer, quick and survey scans, SQLite store, HTML report, s
 
 ```
 sudo apt install python3-spidev python3-libgpiod
-pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.6/lorascan-0.1.6-py3-none-any.whl
+pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.7/lorascan-0.1.7-py3-none-any.whl
 # or from a checkout of https://github.com/Loomwave/lorascan :  pip install .   (developer: pip install -e .)
 ```
 Issues and results: https://github.com/Loomwave/lorascan/issues
@@ -25,7 +25,7 @@ parts, runtime deps `python3-spidev` + `python3-libgpiod` (Recommends), `python3
 script is `lorascan = lorascan.cli:main`; profiles live inside the package (`lorascan/profiles/*.yaml`) and are
 overridable from `/etc/lorascan/profiles/` and `~/.config/lorascan/profiles/`. `pipx install <wheel>` is the
 clean per-user install on a Pi whose system Python is externally managed (PEP 668): `sudo apt install pipx`,
-then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.6/lorascan-0.1.6-py3-none-any.whl`
+then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.7/lorascan-0.1.7-py3-none-any.whl`
 (`--system-site-packages` so the apt-installed spidev/gpiod modules are visible).
 
 ## Wire and describe your radio
@@ -111,6 +111,26 @@ lorascan export --db survey.db --csv slots.csv --table slots --slot 500000   # t
 ```
 CAD rows carry `hit_rate` (hits / n_cad); decode rows are counts and medians only, never payloads.
 (0.1.0–0.1.2 exported only the energy table: Loomwave/lorascan#1.)
+
+## Picking a LoRa-clean 500 kHz slot (multi-bandwidth, dense CAD, your own networks)
+
+```
+lorascan scan survey --profile my-board.yaml --db slot.db --bw 62,125,250,500 --cad-grid 500000 --sfs 7,9,11 --bws 125,250,500 --duration 12h
+lorascan report --db slot.db --out slot.html --slot 500000
+```
+`--bw` takes a list: every width is measured back to back on each channel, so one database holds the energy
+floor at 62/125/250/500 kHz. `--cad-grid 500000` runs a Channel Activity Detection sweep over the centre of
+every 500 kHz window once per grid round at each `--sfs` × `--bws` pair, which surfaces every LoRa family
+in the band whatever its sync word. `--slot 500000` then ranks the windows.
+
+Your own networks: put one preset per line in `~/.config/lorascan/networks.yaml` (or pass `--networks FILE`):
+```
+# network/preset: {sync, sf, bw (kHz), cr, preamble, crc, iq, freqs (MHz, space separated)}
+fort2/main: {sync: 0x3C, sf: 8, bw: 250, cr: 6, preamble: 12, freqs: 905.0 906.5}
+meshcore/us-narrow: {sync: 0x12, sf: 7, bw: 62, preamble: 32, freqs: 910.525 912.0}   # overrides the built-in preset
+```
+User networks are appended to the built-in table; a user preset with a built-in network/preset name replaces it.
+`scan watch` and `test` decode against the merged table.
 
 ## Slot view, standalone SVGs, rendering from a share file
 

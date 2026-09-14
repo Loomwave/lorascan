@@ -23,7 +23,8 @@ from .plan.watch import watch_plan
 from .plan.candidate import candidate_plan, parse_candidates
 from .measure.cad import cad_sweep
 from .measure.decode import decode_dwell
-from .networks import NETWORKS, presets_on
+from . import networks as netmod
+from .networks import presets_on
 from .store.db import Store
 from .report.html import render_report
 from .share import build_share, write_share, coarse_cell, submitter_token, DEFAULT_CELL_DEG, SHARE_FORMAT, choose_by_budget, parse_budget, upload_share, gzip_bytes
@@ -104,6 +105,12 @@ def _run_scan(a, kind: str) -> int:
         a.fake_clock = True          # a simulated radio never sleeps; drive its time from a fake clock
     fake_clock = [0.0]
     clock = (lambda: fake_clock[0]) if a.fake_clock else time.monotonic
+    user_nets = netmod.load_user_networks(a.networks) if getattr(a, "networks", None) else netmod.load_default_user_networks()
+    if user_nets:
+        netmod.set_networks(netmod.merge_networks(netmod.BUILTIN_NETWORKS, user_nets))
+        print(f"[scan] user network table: {', '.join(n.name + '(' + str(len(n.presets)) + ')' for n in user_nets)}")
+    bws_energy = [int(x) for x in str(a.bw).split(",")]
+    cad_grid = [int(a.start + a.cad_grid / 2 + k * a.cad_grid) for k in range((a.stop - a.start) // a.cad_grid)] if getattr(a, "cad_grid", None) else []
     run_id = store.new_run(kind, prof.name, a.note)
     mq = None
     if getattr(a, "mqtt", None):
@@ -115,15 +122,18 @@ def _run_scan(a, kind: str) -> int:
     cad_bws = [int(x) for x in a.bws.split(",")] if getattr(a, "bws", None) else [125, 250]
     if kind == "quick":
         grid = band_grid(a.start, a.stop, a.step)
-        base = quick_plan(grid, passes=a.passes, dwell_s=a.dwell, bw_khz=a.bw)
-        if a.cad:
+        base = quick_plan(grid, passes=a.passes, dwell_s=a.dwell, bw_khz=bws_energy)
+        if a.cad or cad_grid:
             def _quick_with_cad():
                 hot = set()
                 for st in base:
                     yield st
                     if activity.get(st.freq_hz, 0.0) > 0.05:
                         hot.add(st.freq_hz)
-                for st in _cad_steps(sorted(hot | {f for f, _ in KNOWN_CHANNELS}), cad_sfs, cad_bws):
+                if a.cad:
+                    for st in _cad_steps(sorted(hot | {f for f, _ in KNOWN_CHANNELS}), cad_sfs, cad_bws):
+                        yield st
+                for st in _cad_steps(cad_grid, cad_sfs, cad_bws):          # dense whole-band CAD grid (#2 item 2)
                     yield st
                 quiet = min(activity, key=activity.get) if activity else grid[-1]
                 yield Step(quiet, 125, 0.0, "cad", sf=9, network="reference")     # CAD false-alarm reference on the quietest channel
@@ -132,16 +142,20 @@ def _run_scan(a, kind: str) -> int:
             steps = base
     elif kind == "survey":
         grid = band_grid(a.start, a.stop, a.step)
-        base = survey_plan(grid, dwell_s=a.dwell, revisit_max_s=a.revisit, activity=activity, bw_khz=a.bw, clock=clock)
-        if a.cad:
+        base = survey_plan(grid, dwell_s=a.dwell, revisit_max_s=a.revisit, activity=activity, bw_khz=bws_energy, clock=clock)
+        if a.cad or cad_grid:
             def _survey_with_cad():
                 n = 0
+                per_round = len(grid) * len(bws_energy)
                 for st in base:
                     yield st
                     n += 1
-                    if n % len(grid) == 0:      # one CAD pass over the currently hot + known channels per grid round
-                        hot = [f for f, v in activity.items() if v > 0.05]
-                        for c in _cad_steps(sorted(set(hot) | {f for f, _ in KNOWN_CHANNELS}), cad_sfs, cad_bws):
+                    if n % per_round == 0:      # one CAD pass per grid round: hot + known channels (--cad) and/or the dense grid (--cad-grid)
+                        if a.cad:
+                            hot = [f for f, v in activity.items() if v > 0.05]
+                            for c in _cad_steps(sorted(set(hot) | {f for f, _ in KNOWN_CHANNELS}), cad_sfs, cad_bws):
+                                yield c
+                        for c in _cad_steps(cad_grid, cad_sfs, cad_bws):
                             yield c
                         quiet = min(activity, key=activity.get) if activity else grid[-1]
                         yield Step(quiet, 125, 0.0, "cad", sf=9, network="reference")
@@ -171,7 +185,7 @@ def _run_scan(a, kind: str) -> int:
     n, failures = 0, 0
     engine = a.engine
     scan_failures = 0
-    nets = {nw.name: nw for nw in NETWORKS}
+    nets = {nw.name: nw for nw in netmod.NETWORKS}
     if engine == "scan":
         upload_patch(radio)
         print(f"[scan] scan patch uploaded; chip version string {version_string(radio)!r}")
@@ -445,7 +459,9 @@ def build_parser() -> argparse.ArgumentParser:
         if kind == "test":
             sp.add_argument("--candidates", required=True, help="MHz/SF/BW[/CR] list, e.g. 905.0/9/125,921.0/11/250/8")
         sp.add_argument("--start", type=int, default=902_000_000); sp.add_argument("--stop", type=int, default=928_000_000); sp.add_argument("--step", type=int, default=200_000)
-        sp.add_argument("--bw", type=int, default=125, help="measurement bandwidth kHz (62/125/250/500)")
+        sp.add_argument("--bw", default="125", help="measurement bandwidth kHz (62/125/250/500), or a list 62,125,250,500 measured back to back per channel")
+        sp.add_argument("--cad-grid", type=int, default=None, help="quick/survey: CAD-sweep the whole band once per round on windows this wide (Hz, e.g. 500000) at every --sfs x --bws")
+        sp.add_argument("--networks", default=None, help="user network table (default ~/.config/lorascan/networks.yaml or /etc/lorascan/networks.yaml if present)")
         sp.add_argument("--busy-t", type=float, default=8.0, help="busy threshold dB above floor")
         sp.add_argument("--engine", choices=("poll", "scan"), default="poll", help="poll = host-polled GetRssiInst; scan = on-chip histogram (Semtech scan patch, experimental)")
         sp.add_argument("--nb-scan", type=int, default=None, help="samples per on-chip scan (engine=scan); default = dwell / 8.2 us, max 65535")

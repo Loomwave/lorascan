@@ -20,8 +20,10 @@ class Step:
 
 
 def survey_plan(grid: list[int], dwell_s: float = 0.4, revisit_max_s: float = 600.0,
-                activity: dict[int, float] | None = None, bw_khz: int = 125,
+                activity: dict[int, float] | None = None, bw_khz=125,
                 clock: Callable[[], float] = time.monotonic) -> Iterator[Step]:
+    """bw_khz may be a list (Loomwave/lorascan#2): every width is measured back to back per visit."""
+    bws = list(bw_khz) if isinstance(bw_khz, (list, tuple)) else [bw_khz]
     activity = activity if activity is not None else {}
     last: dict[int, float] = {}
     n_hot = max(1, len(grid) // 10)
@@ -36,13 +38,16 @@ def survey_plan(grid: list[int], dwell_s: float = 0.4, revisit_max_s: float = 60
         # never take more than a third of the steps
         stride = max(8, 2 * len(hot))
         for i, f in enumerate(due):
-            yield Step(f, bw_khz, dwell_s)
+            for bw in bws:
+                yield Step(f, bw, dwell_s)
             last[f] = clock()
             if hot and (i + 1) % stride == 0:
                 for h in hot:
-                    yield Step(h, bw_khz, dwell_s)
+                    for bw in bws:
+                        yield Step(h, bw, dwell_s)
                     last[h] = clock()
         for h in hot:
             if h not in due:
-                yield Step(h, bw_khz, dwell_s)
+                for bw in bws:
+                    yield Step(h, bw, dwell_s)
                 last[h] = clock()
