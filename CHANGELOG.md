@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.13 — 2026-09-14
+- First front end for the community endpoint: `GET /` on `lorascan-share-server` renders the fleet map page (0.1° cells coloured by mean busy fraction, single-submitter cells hatched, each cell linking to OpenStreetMap; band summary across submitters; fleet-wide quietest channels; hour×weekday matrix from hour-granularity uploads; cells and submitters tables) as self-contained HTML with inline SVG — no JavaScript, no CDN. `GET /v1/map.json` returns the aggregates behind it. Flagged (miscalibrated) uploads are counted but never merged.
+
 ## 0.1.12 — 2026-09-14
 - `auto --from openhop` supports SPI SX1262 radios: `radio_type` decides (sx1262 → spidev profile from the `sx1262:` block; sx1262_ch341 → USB; a config without `radio_type` but with a `ch341:` block still resolves as USB; other types fail loudly); location falls back to `repeater.{latitude,longitude}`. The mini-YAML reader parses real openHOP configs (lists of mappings, indentless sequences, `!!binary |` block scalars, empty flow lists/maps). Contributed by @wehooper4 (PR #8), validated on the FRNebra repeater.
 - Fix on top: ordinary indented sequences under a key (`key:` then deeper `- item`) parse again.
