@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.12 — 2026-09-14
+- `auto --from openhop` supports SPI SX1262 radios: `radio_type` decides (sx1262 → spidev profile from the `sx1262:` block; sx1262_ch341 → USB; a config without `radio_type` but with a `ch341:` block still resolves as USB; other types fail loudly); location falls back to `repeater.{latitude,longitude}`. The mini-YAML reader parses real openHOP configs (lists of mappings, indentless sequences, `!!binary |` block scalars, empty flow lists/maps). Contributed by @wehooper4 (PR #8), validated on the FRNebra repeater.
+- Fix on top: ordinary indented sequences under a key (`key:` then deeper `- item`) parse again.
+
 ## 0.1.11 — 2026-09-14
 - Reference share endpoint `lorascan-share-server` (stdlib + SQLite): `/healthz`, `/v1/watermark`, `/v1/share` (gzip JSON, idempotent upserts keyed per the spec, newest `generated` wins), `/v1/stats`; 4 MB gzip / 64 MB inflated / 60 POST per hour per submitter; miscalibrated documents stored `flagged = 1`. Tests drive it with the real `lorascan share --to` client. Deployment kit in `deploy/share-server/` (Dockerfile, k8s.yaml for share.lorascan.app, systemd unit, handover README).
 
