@@ -1,5 +1,7 @@
 """A small YAML subset parser (no dependency): nested block mappings by indentation, scalars
-(int, float, bool, null, hex ints, quoted strings), comments, and lists of scalars ('- x').
+(int, float, bool, null, hex ints, quoted strings), comments, lists of scalars ('- x'), lists of
+mappings ('- key: value'), indentless sequences (key followed by '- x' at the same indent), flow
+lists '[]' / maps '{}', and block scalars ('|' / '>', incl. tagged like '!!binary |').
 Enough for /etc/meshtasticd/*.yaml and /etc/openhop_repeater/config.yaml (Loomwave/lorascan#7)."""
 from __future__ import annotations
 from typing import Any
@@ -42,6 +44,20 @@ def _strip(line: str) -> str:
     return "".join(out).rstrip()
 
 
+def _flow_map(body: str) -> dict:
+    d: dict[str, Any] = {}
+    for part in body.split(","):
+        if not part.strip():
+            continue
+        k, _, v = part.partition(":")
+        d[k.strip()] = _scalar(v)
+    return d
+
+
+def _flow_list(body: str):
+    return [_scalar(x) for x in body.split(",") if x.strip()] if body.strip() else []
+
+
 def parse_yaml(text: str) -> dict:
     lines = []
     for raw in text.splitlines():
@@ -50,35 +66,65 @@ def parse_yaml(text: str) -> dict:
             lines.append((len(s) - len(s.lstrip(" ")), s.strip()))
     pos = [0]
 
-    def block(indent: int):
-        node: Any = None
+    def mapping(indent: int) -> dict:
+        node: dict[str, Any] = {}
         while pos[0] < len(lines):
             ind, s = lines[pos[0]]
             if ind < indent:
                 break
             if ind > indent:
                 raise ValueError(f"yaml: unexpected indent at {s!r}")
-            if s.startswith("- "):
-                node = node if isinstance(node, list) else []
-                node.append(_scalar(s[2:])); pos[0] += 1
-                continue
-            key, sep, val = s.partition(":")
-            if not sep:
-                raise ValueError(f"yaml: expected 'key: value' at {s!r}")
-            node = node if isinstance(node, dict) else {}
-            pos[0] += 1
-            if val.strip():
-                v = val.strip()
-                if v.startswith("{") and v.endswith("}"):
-                    node[key.strip()] = {k.strip(): _scalar(x) for k, _, x in (p.partition(":") for p in v[1:-1].split(",") if p.strip())}
-                elif v.startswith("[") and v.endswith("]"):
-                    node[key.strip()] = [_scalar(x) for x in v[1:-1].split(",") if x.strip()]
-                else:
-                    node[key.strip()] = _scalar(v)
+            if not s.startswith("- "):
+                key, sep, val = s.partition(":")
+                if not sep:
+                    raise ValueError(f"yaml: expected 'key: value' at {s!r}")
+                pos[0] += 1
+                node[key.strip()] = _value(ind, key.strip(), val.strip())
             else:
+                # a list at this indent — attach to the last key that is empty?
+                # In YAML this only happens for an indentless sequence under the
+                # immediately-preceding key; our mapping() callers handle that.
+                break
+        return node
+
+    def seq(indent: int):
+        out = []
+        while pos[0] < len(lines):
+            ind, s = lines[pos[0]]
+            if ind != indent or not s.startswith("- "):
+                break
+            pos[0] += 1
+            item = s[2:].strip()
+            k, sep, v = item.partition(":")
+            if sep:
+                d: dict[str, Any] = {}
+                d[k.strip()] = _value(ind, k.strip(), v.strip())
+                # remaining members at deeper indent
                 if pos[0] < len(lines) and lines[pos[0]][0] > indent:
-                    node[key.strip()] = block(lines[pos[0]][0])
-                else:
-                    node[key.strip()] = None
-        return node if node is not None else {}
-    return block(lines[0][0]) if lines else {}
+                    members = mapping(lines[pos[0]][0])
+                    d.update(members)
+                out.append(d)
+            else:
+                out.append(_scalar(item))
+        return out
+
+    def _value(ind: int, key: str, v: str) -> Any:
+        if not v:
+            if pos[0] < len(lines) and lines[pos[0]][0] > ind:
+                return mapping(lines[pos[0]][0])
+            if pos[0] < len(lines) and lines[pos[0]][0] == ind and lines[pos[0]][1].startswith("- "):
+                return seq(ind)
+            return None
+        if v.endswith("|") or v.endswith(">"):
+            parts = []
+            while pos[0] < len(lines) and lines[pos[0]][0] > ind:
+                parts.append(lines[pos[0]][1])
+                pos[0] += 1
+            return "\n".join(parts) if v.endswith("|") else " ".join(parts)
+        if v.startswith("{") and v.endswith("}"):
+            return _flow_map(v[1:-1])
+        if v.startswith("[") and v.endswith("]"):
+            return _flow_list(v[1:-1])
+        return _scalar(v)
+
+    return mapping(lines[0][0]) if lines else {}
