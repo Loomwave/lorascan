@@ -238,3 +238,28 @@ def test_cli_auto_dry_run_prints_and_touches_nothing(tmp_path, capsys, monkeypat
     out = capsys.readouterr().out
     assert rc == 0 and "meshtasticd.service" in out and "/dev/spidev0.1" in out and "scan survey" in out and "--duration 1h" in out and "would stop" in out
     assert not any(c[:2] == ["systemctl", "stop"] for c in calls)
+
+
+def test_yamlmini_indented_sequences_of_scalars_and_mappings():
+    """Regression after #8: an ordinary indented list under a key ('key:' then deeper '- item') raised."""
+    s = """\
+a:
+  b: 1
+  c:
+    - x: 1
+      y:
+        z: true
+    - x: 2
+  d: {p: 1, q: two}
+  e: |
+    line1
+    line2
+  f: after
+  names:
+    - alpha
+    - beta
+g: 0x10
+"""
+    d = parse_yaml(s)
+    assert d["a"]["c"] == [{"x": 1, "y": {"z": True}}, {"x": 2}] and d["a"]["names"] == ["alpha", "beta"]
+    assert d["a"]["d"] == {"p": 1, "q": "two"} and d["a"]["e"] == "line1\nline2" and d["a"]["f"] == "after" and d["g"] == 16
