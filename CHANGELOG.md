@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.4 — 2026-09-14
+- Community sharing for thin uplinks (share format `lorascan-share/2`): `share --granularity hour|day` (day adds the 7×24 when-matrix; ≈ 3 KB gzipped per day), `--budget 20k/day` picks the coarsest document that fits, `--to URL` uploads gzip JSON incrementally against the endpoint's watermark (idempotent rows, 5xx/network retries), and `lorascan upload FILE --to URL` sends a file written earlier from any machine. Endpoint protocol in docs/superpowers/specs/2026-09-14-lorascan-share-endpoint.md; share.lorascan.app deployment is a separate task.
+
 ## 0.1.3 — 2026-09-14
 - `export --csv X.csv` now writes every table: energy to `X.csv`, CAD to `X-cad.csv` (with `hit_rate`), decodes to `X-decode.csv`; `--table energy|cad|decode` writes one table to the named file. 0.1.0–0.1.2 silently exported only energy (Loomwave/lorascan#1, reported by @wehooper4).
 - README: export section, FAQ (LoRa vs GFSK listening), and the first CH341/MeshToad validation (Debian 13, Python 3.13) from that report.
