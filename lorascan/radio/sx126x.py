@@ -32,9 +32,21 @@ RX_GAIN_BOOSTED = 0x96
 RX_GAIN_POWER_SAVE = 0x94
 SYNC_PRIVATE = 0x1424              # SX126x "private network" default (reads 0x14 0x24 out of reset)
 
-IRQ_TERMINAL = 0x0001 | 0x0002 | 0x0200 | 0x0040   # TxDone|RxDone|Timeout|CrcErr (mask kept from infrad)
-IRQ_PREAMBLE = 0x0004
-IRQ_HEADER_VALID = 0x0010
+OP_SET_CAD_PARAMS = 0x88
+OP_SET_CAD = 0xC5
+OP_GET_IRQ_STATUS = 0x12
+OP_CLEAR_IRQ = 0x02
+OP_SET_PKT_PARAMS = 0x8C
+OP_GET_RX_BUFFER_STATUS = 0x13
+OP_GET_PACKET_STATUS = 0x14
+OP_READ_BUFFER = 0x1E
+
+# IRQ bits, datasheet Table 13-29
+IRQ_TX_DONE, IRQ_RX_DONE, IRQ_PREAMBLE, IRQ_SYNC_VALID = 0x0001, 0x0002, 0x0004, 0x0008
+IRQ_HEADER_VALID, IRQ_HEADER_ERR, IRQ_CRC_ERR, IRQ_CAD_DONE, IRQ_CAD_DETECTED, IRQ_TIMEOUT = 0x0010, 0x0020, 0x0040, 0x0080, 0x0100, 0x0200
+IRQ_TERMINAL = IRQ_TX_DONE | IRQ_RX_DONE | IRQ_TIMEOUT | IRQ_CRC_ERR   # mask kept from infrad
+IRQ_ALL = 0x03FF
+_CAD_SYMBOL_CODE = {1: 0x00, 2: 0x01, 4: 0x02, 8: 0x03, 16: 0x04}
 
 _BW_CODE = {7: 0x00, 10: 0x08, 15: 0x01, 20: 0x09, 31: 0x02, 41: 0x0A, 62: 0x03, 125: 0x04, 250: 0x05, 500: 0x06}
 
@@ -59,6 +71,8 @@ class Sx126x:
         self.profile = profile
         self.nobusy = nobusy
         self.freq_hz = 0
+        self.mode = "unknown"        # 'lora' after init(); 'gfsk' while the scan engine owns the modem
+        self._lora = (9, 125, 5)
 
     # ---- transport ------------------------------------------------------------------------
     def _wait_busy(self) -> None:
@@ -154,6 +168,55 @@ class Sx126x:
         mask = (IRQ_TERMINAL | IRQ_PREAMBLE | IRQ_HEADER_VALID).to_bytes(2, "big")
         d1 = IRQ_TERMINAL.to_bytes(2, "big")
         self.cmd(bytes([OP_SET_DIO_IRQ]) + mask + d1 + bytes(4))
+        self.mode = "lora"
+        self._lora = (sf, bw_khz, cr)
+
+    def ensure_lora(self, freq_hz: int | None = None) -> None:
+        """Bring the modem back to LoRa (a full init) if another engine left it in GFSK."""
+        if self.mode != "lora":
+            self.init(freq_hz or self.freq_hz or 911_500_000, *self._lora)
+
+    # ---- IRQs -----------------------------------------------------------------------------
+    def irq_status(self) -> int:
+        r = self.cmd(bytes([OP_GET_IRQ_STATUS, 0x00]), 2)
+        return (r[0] << 8) | r[1]
+
+    def clear_irq(self, mask: int = IRQ_ALL) -> None:
+        self.cmd(bytes([OP_CLEAR_IRQ, (mask >> 8) & 0xFF, mask & 0xFF]))
+
+    def set_irq_mask(self, mask: int, dio1: int = 0) -> None:
+        self.cmd(bytes([OP_SET_DIO_IRQ]) + mask.to_bytes(2, "big") + dio1.to_bytes(2, "big") + bytes(4))
+
+    # ---- CAD (datasheet §13.4.7) -----------------------------------------------------------
+    def set_cad_params(self, symbols: int, det_peak: int, det_min: int, exit_mode: int = 0x00, timeout: int = 0) -> None:
+        if symbols not in _CAD_SYMBOL_CODE:
+            raise SxError(f"cad symbols must be one of {sorted(_CAD_SYMBOL_CODE)}")
+        self.cmd(bytes([OP_SET_CAD_PARAMS, _CAD_SYMBOL_CODE[symbols], det_peak & 0xFF, det_min & 0xFF, exit_mode & 0xFF]) + timeout.to_bytes(3, "big"))
+
+    def cad_start(self) -> None:
+        self.hal.set_rxen(True)
+        self.cmd(bytes([OP_SET_CAD]))
+
+    # ---- packet reception (counts only; payload bytes are read to drain the FIFO, never kept) ----
+    def set_sync_word(self, word8: int) -> None:
+        """8-bit LoRa sync word (0x12 private, 0x34 LoRaWAN, 0x2B Meshtastic) -> the SX126x register pair."""
+        self.write_reg(REG_LORA_SYNC_MSB, bytes([(word8 & 0xF0) | 0x04, ((word8 & 0x0F) << 4) | 0x04]))
+
+    def set_packet_params_lora(self, preamble: int = 8, payload_len: int = 0xFF, crc_on: bool = True, implicit: bool = False, invert_iq: bool = False) -> None:
+        self.cmd(bytes([OP_SET_PKT_PARAMS]) + preamble.to_bytes(2, "big") + bytes([0x01 if implicit else 0x00, payload_len, 0x01 if crc_on else 0x00, 0x01 if invert_iq else 0x00]))
+
+    def rx_buffer_status(self) -> tuple[int, int]:
+        r = self.cmd(bytes([OP_GET_RX_BUFFER_STATUS, 0x00]), 2)
+        return r[0], r[1]
+
+    def read_buffer(self, offset: int, length: int) -> bytes:
+        return self.cmd(bytes([OP_READ_BUFFER, offset & 0xFF, 0x00]), length)
+
+    def packet_status(self) -> tuple[float, float, float]:
+        """LoRa GetPacketStatus: (RssiPkt dBm, SnrPkt dB, SignalRssiPkt dBm)."""
+        r = self.cmd(bytes([OP_GET_PACKET_STATUS, 0x00]), 3)
+        snr = r[1] - 256 if r[1] > 127 else r[1]
+        return -r[0] / 2.0, snr / 4.0, -r[2] / 2.0
 
     # ---- diagnostics ---------------------------------------------------------------------
     def probe_bytes(self) -> dict:
