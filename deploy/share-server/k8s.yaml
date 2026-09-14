@@ -35,8 +35,15 @@ spec:
         fsGroup: 10001
       containers:
         - name: share
-          image: REGISTRY/lorascan-share-server:0.1.14     # <- fill in
+          image: REGISTRY/lorascan-share-server:0.1.15     # <- fill in
           args: ["--host", "0.0.0.0", "--port", "8081", "--db", "/data/share.sqlite", "--rate-per-hour", "60"]
+          env:
+            # Basemap for the map page (default: OpenStreetMap tiles). For Carto put the key in a Secret; the URL
+            # is visible to every visitor, so restrict the key to the share.lorascan.app referrer at Carto first.
+            - name: LORASCAN_TILES_URL
+              valueFrom: {secretKeyRef: {name: lorascan-tiles, key: url, optional: true}}
+            - name: LORASCAN_TILES_ATTRIBUTION
+              valueFrom: {secretKeyRef: {name: lorascan-tiles, key: attribution, optional: true}}
           ports: [{containerPort: 8081, name: http}]
           volumeMounts: [{name: data, mountPath: /data}]
           readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 10}
