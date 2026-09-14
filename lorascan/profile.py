@@ -128,3 +128,22 @@ def load_profile(name_or_path: str) -> BoardProfile:
             with open(c) as f:
                 return BoardProfile.from_dict(parse_mini_yaml(f.read()))
     raise FileNotFoundError(f"profile {name_or_path!r} not found; searched profiles dirs: {', '.join(PROFILE_DIRS)}")
+
+
+def _y(v) -> str:
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    return str(v)
+
+
+def dump_profile(p: BoardProfile, comment: str = "") -> str:
+    """Serialise a BoardProfile back into the flat mini-YAML the loader reads."""
+    pins = ", ".join(f"{k}: {_y(v)}" for k, v in p.pins.items())
+    head = f"# {comment}\n" if comment else ""
+    return (f"{head}name: {p.name}\n"
+            f"bus: {{type: {p.bus_type}, dev: {p.bus_dev}, hz: {p.bus_hz}}}\n"
+            f"pins: {{{pins}}}\n"
+            f"radio: {{tcxo_v: {p.tcxo_v}, dio2_rf_switch: {_y(p.dio2_rf_switch)}, rx_boosted: {_y(p.rx_boosted)}, max_tx_dbm: {p.max_tx_dbm}}}\n"
+            f"cal:   {{rssi_offset_db: {p.rssi_offset_db}, scan_offset_dbm: {p.scan_offset_dbm}}}\n")

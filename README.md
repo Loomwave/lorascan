@@ -61,6 +61,26 @@ Loomwave; `lorascan/networks.py`) and counts CRC-valid frames with their RSSI an
 are drained and discarded, never stored. `test` ranks candidates by busy fraction + CAD hit rate +
 decoded frames per minute, all measured passively at exactly the candidate's settings.
 
+## Running a long survey on a headless Pi
+
+```
+sudo systemd-run --unit lorascan-survey -p WorkingDirectory=$PWD \
+  python3 -m lorascan scan survey --profile my-board.yaml --engine scan --db survey.db --duration 3d --cad
+lorascan status --db survey.db                 # runs, row counts, age of the last row
+lorascan serve  --db survey.db --port 8080     # live report at http://<pi>:8080/ (re-rendered every 60 s)
+lorascan share  --db survey.db --cell 34.12,-84.38 --dry-run   # the opt-in community share file, to read before any upload
+```
+`--cad` adds Channel Activity Detection sweeps on the busy and known channels once per grid round, plus a
+200-CAD reference sweep on the quietest channel so the report can state the false-alarm rate. Only one
+lorascan may hold a radio at a time (a lock on the SPI device); a second one exits with a message.
+
+## Calibration
+
+`lorascan calibrate --profile my-board.yaml --level -60 --freq 915.0` reads a known input level (a signal
+generator, or a reference transmitter whose level at your antenna port you have measured) and writes
+`rssi_offset_db` into `my-board-calibrated.yaml`. Reports and share files then print absolute dBm;
+without it they say "relative (uncalibrated)" (spec §8).
+
 ## What the numbers mean
 
 Per channel visit the tool stores every RSSI sample's 33-level histogram (4 dB levels, the Semtech

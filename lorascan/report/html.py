@@ -87,7 +87,20 @@ def build_data(store, run_id=None, bucket_s: int | None = 60, rssi_offset_db: fl
                          "decoded": sum(d["n_ok"] for d in decs if d["freq_hz"] == c["freq_hz"]), "floor_med": c["floor_med"] + rssi_offset_db,
                          "p90_med": c["p90_med"] + rssi_offset_db, "n_samples": c["n_samples"]})
         card = rank_candidates(card)
+    fa = None
+    ref = store.con.execute("SELECT detail FROM events WHERE kind = 'cad_reference'" + (" AND run_id = ?" if run_id is not None else "") + " ORDER BY ts DESC LIMIT 1",
+                            ((run_id,) if run_id is not None else ())).fetchone()
+    if ref:
+        try:
+            f_ref, sf_ref, bw_ref = ref[0].split()
+            f_ref, sf_ref, bw_ref = int(f_ref), int(sf_ref[2:]), int(bw_ref[2:]) * 1000
+            m = [c for c in cads if (c["freq_hz"], c["sf"], c["bw_hz"]) == (f_ref, sf_ref, bw_ref)]
+            if m:
+                fa = {"freq_hz": f_ref, "sf": sf_ref, "bw_hz": bw_ref, "rate": round(m[0]["hit_rate"], 4), "n_cad": m[0]["n_cad"]}
+        except ValueError:
+            fa = None
     return {
+        "cad_false_alarm": fa,
         "sfmap": {"freqs_mhz": [f / 1e6 for f in cad_freqs], "sfs": sfs, "z": z},
         "decodes": decs, "card": card,
         "generated": _iso(dt.datetime.now(dt.timezone.utc).timestamp()),
@@ -120,7 +133,7 @@ table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;fon
 <h2>Band summary</h2><div class="note">bar = floor (P10) to peak per channel; label = busy %.</div>
 <div id="band" class="fig"></div>
 <div id="when-wrap" hidden><h2>When is it busy</h2><div class="note">mean busy fraction across all channels by hour of day (UTC) and weekday; needs a run longer than an hour.</div><div id="when" class="fig"></div></div>
-<div id="sf-wrap" hidden><h2>LoRa presence by spreading factor</h2><div class="note">Channel Activity Detection hit rate per (frequency, SF): the LoRa-specific detector, blind across SFs by design.</div><div id="sfmap" class="fig"></div></div>
+<div id="sf-wrap" hidden><h2>LoRa presence by spreading factor</h2><div class="note">Channel Activity Detection hit rate per (frequency, SF): the LoRa-specific detector, blind across SFs by design. {fa_note}</div><div id="sfmap" class="fig"></div></div>
 {card_html}
 <h2>Quietest channels</h2>
 <table><thead><tr><th>MHz</th><th>who lives here</th><th>busy %</th><th>floor dBm</th><th>P90 dBm</th><th>peak dBm</th><th>rows</th><th>decoded</th></tr></thead><tbody>{quiet_rows}</tbody></table>
@@ -155,7 +168,9 @@ def render_report(store, out_path: str, title: str = "lorascan report", run_id=N
         card_html = ("<h2>Candidate report card</h2><div class=\"note\">score = busy fraction + CAD hit rate + decoded frames / 10 (lower is better); every number is from a passive dwell at exactly the candidate settings.</div>"
                      "<table><thead><tr><th>rank</th><th>candidate</th><th>score</th><th>busy %</th><th>CAD hit %</th><th>decoded</th><th>floor dBm</th><th>P90 dBm</th><th>samples</th></tr></thead><tbody>" + card_rows + "</tbody></table>")
     runs = ", ".join(f"#{r['id']} {r['kind']} ({r['profile']}) {_iso(r['first_ts']) if r['first_ts'] else '-'} → {_iso(r['last_ts']) if r['last_ts'] else '-'}" for r in d["runs"]) or "none"
-    page = _PAGE.format(title=html.escape(title), generated=d["generated"], runs=html.escape(runs), calibration=d["calibration"],
+    fa = d.get("cad_false_alarm")
+    fa_note = (f"Reference false-alarm rate {fa['rate']*100:.1f} % from {fa['n_cad']} CADs at SF{fa['sf']} on the quietest channel ({fa['freq_hz']/1e6:.3f} MHz): hit rates near that value are noise, not LoRa." if fa else "")
+    page = _PAGE.format(title=html.escape(title), generated=d["generated"], runs=html.escape(runs), calibration=d["calibration"], fa_note=fa_note,
                         bucket_s=bucket_s, quiet_rows=rows, card_html=card_html, data_json=json.dumps(d).replace("</", "<\\/"), plotly=PLOTLY_URL)
     with open(out_path, "w") as f:
         f.write(page)

@@ -8,7 +8,8 @@ import sys
 import time
 
 from . import __version__
-from .profile import load_profile, BoardProfile
+from .profile import load_profile, BoardProfile, dump_profile
+import dataclasses
 from .hal import open_hal, HalError
 from .hal.lock import DeviceBusy
 from .radio.sx126x import Sx126x, SxError, DeviceError
@@ -110,6 +111,8 @@ def _run_scan(a, kind: str) -> int:
                         hot.add(st.freq_hz)
                 for st in _cad_steps(sorted(hot | {f for f, _ in KNOWN_CHANNELS}), cad_sfs, cad_bws):
                     yield st
+                quiet = min(activity, key=activity.get) if activity else grid[-1]
+                yield Step(quiet, 125, 0.0, "cad", sf=9, network="reference")     # CAD false-alarm reference on the quietest channel
             steps = _quick_with_cad()
         else:
             steps = base
@@ -126,6 +129,8 @@ def _run_scan(a, kind: str) -> int:
                         hot = [f for f, v in activity.items() if v > 0.05]
                         for c in _cad_steps(sorted(set(hot) | {f for f, _ in KNOWN_CHANNELS}), cad_sfs, cad_bws):
                             yield c
+                        quiet = min(activity, key=activity.get) if activity else grid[-1]
+                        yield Step(quiet, 125, 0.0, "cad", sf=9, network="reference")
             steps = _survey_with_cad()
         else:
             steps = base
@@ -164,8 +169,11 @@ def _run_scan(a, kind: str) -> int:
             ts = time.time() if not a.fake_clock else 1_700_000_000.0 + clock()
             try:
                 if step.layer == "cad":
-                    row = cad_sweep(radio, step.freq_hz, step.sf, step.bw_khz, n_cad=a.cad_n, clock=clock, ts=ts, cr=step.cr)
+                    ref = step.network == "reference"
+                    row = cad_sweep(radio, step.freq_hz, step.sf, step.bw_khz, n_cad=(200 if ref else a.cad_n), clock=clock, ts=ts, cr=step.cr)
                     store.add_cad(run_id, row)
+                    if ref:
+                        store.add_event(run_id, "cad_reference", f"{step.freq_hz} sf{step.sf} bw{step.bw_khz}", ts=ts)
                     n += 1
                     if a.verbose:
                         print(f"[cad ] {n:5d} {row.freq_hz/1e6:8.3f} MHz sf{row.sf}/bw{row.bw_hz//1000} hits {row.hits}/{row.n_cad} run {row.longest_run} timeouts {row.timeouts}")
@@ -224,6 +232,24 @@ def _run_scan(a, kind: str) -> int:
         hal.close()
         store.close()
     print(f"[scan] run #{run_id} {kind}: {n} rows, {failures} radio errors, db={a.db}")
+    return 0
+
+
+def cmd_calibrate(a) -> int:
+    """Measure a known input level (a signal generator or a reference transmitter at a measured level)
+    and write the offset that makes the tool read it correctly into a copy of the profile (spec §8)."""
+    prof = _profile(a.profile)
+    hal, radio = _open_radio(prof, int(round(a.freq * 1e6)))
+    try:
+        row = polled_energy(radio, int(round(a.freq * 1e6)), a.bw, a.dwell, sample_gap_s=a.sample_gap)
+    finally:
+        hal.close()
+    offset = round(a.level - row.p50, 1)
+    newp = dataclasses.replace(prof, name=prof.name + "-calibrated", rssi_offset_db=offset)
+    out = a.out or (prof.name + "-calibrated.yaml")
+    with open(out, "w") as f:
+        f.write(dump_profile(newp, f"calibrated {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}: known level {a.level} dBm at {a.freq} MHz read as p50 {row.p50} dBm (n={row.n})"))
+    print(f"[calibrate] measured p50 {row.p50:.1f} dBm for a known {a.level:.1f} dBm input -> rssi_offset_db {offset:+.1f}; wrote {out}")
     return 0
 
 
@@ -342,6 +368,9 @@ def build_parser() -> argparse.ArgumentParser:
         if kind == "test":
             sp.set_defaults(dwell=30.0)
         sp.set_defaults(fn=lambda a, k=kind: _run_scan(a, k))
+    sp = sub.add_parser("calibrate", help="turn a known input level into rssi_offset_db in a copy of the profile"); radio_args(sp)
+    sp.add_argument("--level", type=float, required=True, help="known input level at the antenna port, dBm"); sp.add_argument("--freq", type=float, default=915.0, help="MHz")
+    sp.add_argument("--bw", type=int, default=125); sp.add_argument("--out", default=None); sp.set_defaults(fn=cmd_calibrate, dwell=2.0)
     sp = sub.add_parser("serve", help="live web page of a database (for a running survey)"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--host", default="0.0.0.0"); sp.add_argument("--port", type=int, default=8080); sp.add_argument("--refresh", type=int, default=60); sp.set_defaults(fn=cmd_serve)
     sp = sub.add_parser("status", help="runs, row counts and last-row age in a database"); sp.add_argument("--db", default="lorascan.db"); sp.set_defaults(fn=cmd_status)
     sp = sub.add_parser("report"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--out", default="lorascan-report.html"); sp.add_argument("--title", default="lorascan report")
