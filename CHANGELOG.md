@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.8 — 2026-09-14
+- `lorascan syncfind --freq --sf --bw [--cr] [--syncs] [--sync-dwell]`: sweeps the 8-bit sync words at one PHY hypothesis and reports the ones that decode (counts, RSSI, SNR) with a ready-made networks.yaml line; rows land in the decode table as `sync-0xNN`. (#5)
+- Slot score gains a worst-case-floor term, (floor_worst − best floor in the band) / 10 dB, so a steady carrier cannot rank as a clean window; `floor_penalty` column in the table and the CSV. (#4 field note)
+- README: sync-word finder, CAD cross-SF desense caveat from the FORT2 data.
+
 ## 0.1.7 — 2026-09-14
 - `--bw 62,125,250,500` on quick/survey: every width measured back to back per channel in one run (#2 item 1).
 - `--cad-grid 500000` on quick/survey: a CAD sweep over the centre of every window once per grid round at each `--sfs` × `--bws` pair, i.e. dense whole-band LoRa detection independent of sync word (#2 item 2).
