@@ -7,7 +7,7 @@ repo): stdlib Python, one process, SQLite in `/data/share.sqlite`, routes `GET /
 
 ## Steps
 1. Build and push the image from the lorascan repo root (tag = the lorascan version):
-   `docker build -f deploy/share-server/Dockerfile -t REGISTRY/lorascan-share-server:0.1.13 . && docker push …` (retag + rollout for each lorascan release that touches the server)
+   `docker build -f deploy/share-server/Dockerfile -t REGISTRY/lorascan-share-server:0.1.14 . && docker push …` (retag + rollout for each lorascan release that touches the server)
 2. Edit `k8s.yaml`: image reference, `ingressClassName`, the cert-manager issuer. Point DNS `share.lorascan.app`
    at the ingress. `kubectl apply -f deploy/share-server/k8s.yaml`.
 3. Verify: `curl -s https://share.lorascan.app/healthz` → `ok`; `curl -s https://share.lorascan.app/v1/stats` → JSON counts;
