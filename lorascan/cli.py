@@ -75,6 +75,8 @@ def _run_scan(a, kind: str) -> int:
     prof = _profile(a.profile)
     store = Store(a.db)
     grid = band_grid(a.start, a.stop, a.step)
+    if prof.bus_type == "fake":
+        a.fake_clock = True          # a simulated radio never sleeps; drive its time from a fake clock
     fake_clock = [0.0]
     clock = (lambda: fake_clock[0]) if a.fake_clock else time.monotonic
     run_id = store.new_run(kind, prof.name, a.note)
