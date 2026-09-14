@@ -52,9 +52,27 @@ are discarded and counted.
 P1 never transmits: the driver has no transmit call and the PA is parked at −9 dBm. Later phases add
 an opt-in two-radio link test behind `--tx-ok` with power and duty-cycle caps.
 
+## Engines
+
+`--engine poll` (default) polls `GetRssiInst` from the host: ~1.4 kHz over spidev, far less over USB
+bridges. `--engine scan` uploads Semtech's spectral-scan RAM patch (as redistributed by RadioLib) and
+lets the chip build a 33-level histogram itself at ~120 k samples/s; one 0.4 s visit yields ~48 000
+samples. The scan engine runs the GFSK receiver at the nearest bandwidth at or above `--bw` (datasheet
+Table 13-45). Two things learned on hardware and encoded in the code: the modem must be in GFSK mode
+with Semtech's `util_spectral_scan` parameters, and the scan status register keeps the previous
+COMPLETED flag until the new scan is running, so the tool waits the nominal scan time before polling
+and rejects any histogram whose sample count is not the requested one. If the engine fails twice the
+scan falls back to polling and says so.
+
 ## Validated on
 
-See the "Validated on" section at the bottom once the bench acceptance run is recorded.
+- 2026-09-14, Loomwave bench Raspberry Pi 5 (Debian 12, Python 3.11, python3-spidev 3.5,
+  python3-libgpiod 1.6) with a Nebra Duo HAT (E22P-915M30S SX1262 on spidev0.0, BUSY 23, DIO1 24,
+  RESET 22): `probe` GOOD (0x14 0x24), `selftest` PASS, quick scan 274 rows in 2.6 min (polled),
+  scan engine complete histograms of 48 780 samples per 0.4 s visit. Against `infrad bandscan 4` on
+  the same HAT the same hour, floors agreed to +0.5 dB mean (−7…+8 dB spread over 14 channels); the
+  reference disagreed with itself by up to 9 dB between two back-to-back runs on that bench, so a
+  quiet-site or long-dwell comparison is still owed before absolute agreement is claimed.
 
 ## Licence
 
