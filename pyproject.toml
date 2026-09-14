@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lorascan"
-version = "0.1.1"
+version = "0.1.2"
 description = "LoRa-chipset band scanner and interference heat map for 902-928 MHz (SX1262 on Debian)"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -13,6 +13,7 @@ dependencies = []
 
 [project.optional-dependencies]
 spidev = ["spidev>=3.5", "gpiod>=1.6"]
+mqtt = ["paho-mqtt>=1.6"]
 dev = ["pytest>=7"]
 
 [project.scripts]
