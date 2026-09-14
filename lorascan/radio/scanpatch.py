@@ -50,6 +50,7 @@ def upload_patch(radio) -> None:
         radio.write_reg(REG_PATCH_MEMORY_BASE + 4 * i, w.to_bytes(4, "big"))
     radio.write_reg(REG_PATCH_UPDATE_ENABLE, bytes([PATCH_UPDATE_DISABLED]))
     radio.cmd(bytes([CMD_PRAM_UPDATE]))
+    radio.patch_loaded = True
 
 
 # GFSK RX bandwidth codes, datasheet Table 13-45 (DSB kHz -> ModParam5)
@@ -142,6 +143,8 @@ def hist_stats(hist: list[int], offset_dbm: int = -11, busy_t_db: float = BUSY_T
 
 def scan_energy(radio, freq_hz: int, bw_khz: int, nb_scan: int = 2048, offset_dbm: int = -11,
                 busy_t_db: float = BUSY_T_DB, ts: float | None = None, clock=time.monotonic) -> EnergyRow:
+    if not getattr(radio, "patch_loaded", False):
+        upload_patch(radio)                # a reset (e.g. ensure_lora -> init) wipes the RAM patch
     if getattr(radio, "mode", None) != "gfsk" or getattr(radio, "_scan_mode_bw", None) != bw_khz:
         setup_scan_mode(radio, bw_khz)
     radio.set_frequency(freq_hz)

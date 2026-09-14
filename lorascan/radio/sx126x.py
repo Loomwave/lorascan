@@ -72,6 +72,7 @@ class Sx126x:
         self.nobusy = nobusy
         self.freq_hz = 0
         self.mode = "unknown"        # 'lora' after init(); 'gfsk' while the scan engine owns the modem
+        self.patch_loaded = False    # the spectral-scan RAM patch does not survive reset()
         self._lora = (9, 125, 5)
 
     # ---- transport ------------------------------------------------------------------------
@@ -102,6 +103,7 @@ class Sx126x:
 
     # ---- state ----------------------------------------------------------------------------
     def reset(self) -> None:
+        self.patch_loaded = False
         self.hal.set_reset(False)
         self.hal.sleep(0.002)
         self.hal.set_reset(True)

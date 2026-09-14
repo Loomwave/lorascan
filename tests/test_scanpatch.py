@@ -83,3 +83,16 @@ def test_incomplete_histogram_is_an_error():
     hal, r = mk({0x1D: lambda tx: (bytes(4) + bytes([0xFF])) if tx[1:3] == bytes([0x07, 0xCD]) else (bytes(4) + res if tx[1:3] == bytes([0x04, 0x01]) else bytes(len(tx)))})
     with pytest.raises(ScanError):
         spectral_scan(r, 2000)
+
+
+def test_patch_is_reuploaded_after_a_reset(monkeypatch):
+    counts = [0] * 33; counts[24] = 2000
+    res = b"".join(c.to_bytes(2, "big") for c in counts)
+    hal, r = mk({0x1D: lambda tx: (bytes(4) + bytes([0xFF])) if tx[1:3] == bytes([0x07, 0xCD]) else (bytes(4) + res if tx[1:3] == bytes([0x04, 0x01]) else bytes(len(tx)))})
+    upload_patch(r); assert r.patch_loaded
+    r.init(911_500_000)                     # reset inside init clears the patch
+    assert not r.patch_loaded
+    hal.log.clear()
+    scan_energy(r, 911_500_000, 125, nb_scan=2000)
+    assert bytes([0xD9]) in hal.log         # PRAM update = the patch was uploaded again before scanning
+    assert r.patch_loaded
