@@ -10,6 +10,7 @@ from ..measure.energy import EnergyRow, NUM_LEVELS, BUSY_T_DB
 from .sx126x import OP_SET_STANDBY, OP_SET_RX
 from .patch_scan_bin import PATCH_WORDS
 
+SCAN_SAMPLE_S = 8.2e-6      # one spectral-scan sample per 8.2 us (Semtech AN, sx1302_hal)
 REG_VERSION_STRING = 0x0320
 REG_SPECTRAL_SCAN_RESULT = 0x0401
 REG_PATCH_UPDATE_ENABLE = 0x0610
@@ -153,4 +154,4 @@ def scan_energy(radio, freq_hz: int, bw_khz: int, nb_scan: int = 2048, offset_db
     radio.standby()
     st = hist_stats(hist, offset_dbm, busy_t_db)
     return EnergyRow(ts=ts if ts is not None else time.time(), freq_hz=freq_hz, bw_hz=bw_khz * 1000,
-                     engine="scan", n=sum(hist), hist=hist, discarded=0, **st)
+                     engine="scan", n=sum(hist), hist=hist, discarded=0, dwell_s=round(nb_scan * SCAN_SAMPLE_S, 6), **st)
