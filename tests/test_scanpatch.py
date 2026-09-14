@@ -3,7 +3,7 @@ from lorascan.hal.fake import FakeHal
 from lorascan.profile import load_profile
 from lorascan.radio.sx126x import Sx126x
 from lorascan.radio.patch_scan_bin import PATCH_WORDS
-from lorascan.radio.scanpatch import upload_patch, spectral_scan, scan_energy, ScanAborted, ScanTimeout, hist_stats
+from lorascan.radio.scanpatch import upload_patch, spectral_scan, scan_energy, ScanAborted, ScanTimeout, hist_stats, setup_scan_mode, gfsk_bw_code
 
 def mk(replies):
     base = {0x17: bytes(4)}; base.update(replies)
@@ -34,8 +34,9 @@ def test_spectral_scan_reads_33_counts():
     h = spectral_scan(r, nb_scan=2048, interval=11, window=0x14, timeout_s=1.0)
     assert h == counts
     ops = [t[0] for t in hal.log]
-    assert ops[0] == 0x0D and hal.log[0][1:4] == bytes([0x08, 0x9B, 0x14])   # RSSI averaging window
-    assert ops[1] == 0x82 and hal.log[2][:4] == bytes([0x9B, 0x08, 0x00, 11]) # SetRx inf, then scan params
+    assert hal.log[0][1:4] == bytes([0x08, 0x9B, 0x00])                        # abort/clear first
+    assert hal.log[1][1:4] == bytes([0x08, 0x9B, 0x14])                        # RSSI averaging window
+    assert ops[2] == 0x82 and hal.log[3][:4] == bytes([0x9B, 0x08, 0x00, 11])  # SetRx inf, then scan params
 
 def test_spectral_scan_aborted_and_timeout():
     hal, r = mk({0x1D: lambda tx: bytes(4) + bytes([0xF0]) if tx[1:3] == bytes([0x07, 0xCD]) else bytes(len(tx))})
@@ -56,3 +57,17 @@ def test_scan_energy_row():
     hal, r = mk({0x1D: lambda tx: (bytes(4) + bytes([0xFF])) if tx[1:3] == bytes([0x07, 0xCD]) else (bytes(4) + res if tx[1:3] == bytes([0x04, 0x01]) else bytes(len(tx)))})
     row = scan_energy(r, 911_500_000, 125, nb_scan=2000, offset_dbm=-11)
     assert row.engine == "scan" and row.n == 2000 and row.hist == counts and row.floor_dbm == -107.0 and row.freq_hz == 911_500_000
+
+
+def test_setup_scan_mode_is_semtechs_gfsk_recipe():
+    hal, r = mk({})
+    setup_scan_mode(r, 125.0)
+    log = hal.log
+    assert log[0][:2] == bytes([0x80, 0x00]) and log[1] == bytes([0x8F, 0x80, 0x80])
+    assert log[2] == bytes([0x0D, 0x08, 0xAC, 0xCB]) and log[3] == bytes([0x8A, 0x00])
+    assert log[4] == bytes([0x0D, 0x08, 0x9B, 0x14])
+    assert log[5] == bytes([0x8B, 0x00, 0x14, 0x00, 0x00, 0x1A, 0x02, 0xE9, 0x0F])   # 125 kHz -> nearest GFSK RX BW at/above = 156.2 kHz = 0x1A
+    assert log[6] == bytes([0x8C, 0x00, 0x20, 0x05, 0x20, 0x00, 0x01, 0xFF, 0x01, 0x00])
+
+def test_gfsk_bw_code_picks_nearest_at_or_above():
+    assert gfsk_bw_code(125.0) == 0x1A and gfsk_bw_code(234.3) == 0x0A and gfsk_bw_code(62.5) == 0x1B and gfsk_bw_code(500) == 0x09

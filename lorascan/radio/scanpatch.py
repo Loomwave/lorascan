@@ -52,10 +52,45 @@ def upload_patch(radio) -> None:
     radio.cmd(bytes([CMD_PRAM_UPDATE]))
 
 
+# GFSK RX bandwidth codes, datasheet Table 13-45 (DSB kHz -> ModParam5)
+GFSK_RX_BW = {4.8: 0x1F, 5.8: 0x17, 7.3: 0x0F, 9.7: 0x1E, 11.7: 0x16, 14.6: 0x0E, 19.5: 0x1D, 23.4: 0x15, 29.3: 0x0D,
+              39.0: 0x1C, 46.9: 0x14, 58.6: 0x0C, 78.2: 0x1B, 93.8: 0x13, 117.3: 0x0B, 156.2: 0x1A, 187.2: 0x12,
+              234.3: 0x0A, 312.0: 0x19, 373.6: 0x11, 467.0: 0x09}
+OP_SET_PACKET_TYPE, OP_SET_MOD_PARAMS, OP_SET_PKT_PARAMS, OP_SET_BUFFER_BASE = 0x8A, 0x8B, 0x8C, 0x8F
+REG_RX_GAIN = 0x08AC
+
+
+def gfsk_bw_code(bw_khz: float) -> int:
+    """Nearest GFSK RX bandwidth at or above the requested measurement bandwidth."""
+    for k in sorted(GFSK_RX_BW):
+        if k >= bw_khz - 1e-6:
+            return GFSK_RX_BW[k]
+    return GFSK_RX_BW[467.0]
+
+
+def setup_scan_mode(radio, bw_khz: float = 125.0) -> None:
+    """The scan patch samples RSSI through the GFSK receiver. Configure it the way Semtech's
+    util_spectral_scan does (loragw_sx1261.c sx1261_setup / sx1261_set_rx_params): STDBY_RC, buffer base
+    0x80/0x80, register 0x08AC = 0xCB (Semtech's 'sensitivity adjustment'), packet type GFSK, mod params
+    bitrate 0x001400 / no shaping / RX BW code / fdev 0x02E90F, packet params preamble 32 bits, detector
+    16 bits, sync 32 bits, variable length, 255 B, CRC off, no whitening, RSSI averaging window 0x14.
+    Leaves the LoRa modem configuration behind: call radio.init() to go back to LoRa."""
+    radio.cmd(bytes([OP_SET_STANDBY, 0x00]))
+    radio.cmd(bytes([OP_SET_BUFFER_BASE, 0x80, 0x80]))
+    radio.write_reg(REG_RX_GAIN, bytes([0xCB]))
+    radio.cmd(bytes([OP_SET_PACKET_TYPE, 0x00]))
+    radio.write_reg(REG_RSSI_AVG_WINDOW, bytes([WINDOW_DEFAULT]))
+    radio.cmd(bytes([OP_SET_MOD_PARAMS, 0x00, 0x14, 0x00, 0x00, gfsk_bw_code(bw_khz), 0x02, 0xE9, 0x0F]))
+    radio.cmd(bytes([OP_SET_PKT_PARAMS, 0x00, 0x20, 0x05, 0x20, 0x00, 0x01, 0xFF, 0x01, 0x00]))
+    radio._scan_mode_bw = bw_khz
+
+
 def spectral_scan(radio, nb_scan: int = 2048, interval: int = SCAN_INTERVAL_8_20_US, window: int = WINDOW_DEFAULT,
                   timeout_s: float = 2.0, clock=time.monotonic) -> list[int]:
     """Run one histogram scan on the current frequency; returns 33 counts (level i = offset - 4i dBm,
-    level 32 = below level 31). Raises ScanAborted / ScanTimeout."""
+    level 32 = below level 31). Raises ScanAborted / ScanTimeout. Aborts any previous scan first, as
+    RadioLib and util_spectral_scan do, so the status/result registers start clean."""
+    radio.write_reg(REG_RSSI_AVG_WINDOW, bytes([0x00]))          # abort / clear
     radio.write_reg(REG_RSSI_AVG_WINDOW, bytes([window]))
     radio.cmd(bytes([OP_SET_RX, 0xFF, 0xFF, 0xFF]))
     radio.cmd(bytes([CMD_SET_SPECTR_SCAN_PARAMS, (nb_scan >> 8) & 0xFF, nb_scan & 0xFF, interval]))
@@ -99,6 +134,8 @@ def hist_stats(hist: list[int], offset_dbm: int = -11, busy_t_db: float = BUSY_T
 
 def scan_energy(radio, freq_hz: int, bw_khz: int, nb_scan: int = 2048, offset_dbm: int = -11,
                 busy_t_db: float = BUSY_T_DB, ts: float | None = None, clock=time.monotonic) -> EnergyRow:
+    if getattr(radio, "_scan_mode_bw", None) != bw_khz:
+        setup_scan_mode(radio, bw_khz)
     radio.set_frequency(freq_hz)
     radio.hal.set_rxen(True)
     hist = spectral_scan(radio, nb_scan, clock=clock)

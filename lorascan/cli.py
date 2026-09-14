@@ -119,6 +119,7 @@ def _run_scan(a, kind: str) -> int:
                         if scan_failures >= 2:
                             print(f"[scan] WARNING: spectral-scan engine failed twice ({e}); falling back to the polled engine", file=sys.stderr)
                             engine = "poll"
+                            radio.init(step.freq_hz)      # back to the LoRa modem the polled engine expects
                         continue
                 else:
                     row = polled_energy(radio, step.freq_hz, step.bw_khz, step.dwell_s, clock=clock, sample_gap_s=a.sample_gap,
