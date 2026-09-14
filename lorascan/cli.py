@@ -104,6 +104,11 @@ def _run_scan(a, kind: str) -> int:
     fake_clock = [0.0]
     clock = (lambda: fake_clock[0]) if a.fake_clock else time.monotonic
     run_id = store.new_run(kind, prof.name, a.note)
+    mq = None
+    if getattr(a, "mqtt", None):
+        from .mqtt import MqttPublisher, parse_mqtt_url
+        mq = MqttPublisher(parse_mqtt_url(a.mqtt))          # connects now: a bad broker fails before the radio is opened
+        mq.publish_status({"run_id": run_id, "kind": kind, "profile": prof.name, "state": "running"})
     activity: dict[int, float] = {}
     cad_sfs = [int(x) for x in a.sfs.split(",")] if getattr(a, "sfs", None) else [7, 9, 11]
     cad_bws = [int(x) for x in a.bws.split(",")] if getattr(a, "bws", None) else [125, 250]
@@ -180,6 +185,7 @@ def _run_scan(a, kind: str) -> int:
                     ref = step.network == "reference"
                     row = cad_sweep(radio, step.freq_hz, step.sf, step.bw_khz, n_cad=(200 if ref else a.cad_n), clock=clock, ts=ts, cr=step.cr)
                     store.add_cad(run_id, row)
+                    if mq: mq.publish_cad(row)
                     if ref:
                         store.add_event(run_id, "cad_reference", f"{step.freq_hz} sf{step.sf} bw{step.bw_khz}", ts=ts)
                     n += 1
@@ -191,6 +197,7 @@ def _run_scan(a, kind: str) -> int:
                     preset = [p for p in net.presets if p.name == step.preset][0]
                     row = decode_dwell(radio, step.freq_hz, net, preset, step.dwell_s, clock=clock, ts=ts)
                     store.add_decode(run_id, row)
+                    if mq: mq.publish_decode(row)
                     n += 1
                     if a.verbose:
                         print(f"[dec ] {n:5d} {row.freq_hz/1e6:8.3f} MHz {row.network}/{row.preset}: ok {row.n_ok} crc-err {row.n_crc_err} rssi {row.rssi_med:.0f} snr {row.snr_med:.1f}")
@@ -226,6 +233,7 @@ def _run_scan(a, kind: str) -> int:
                     break
                 continue
             store.add_energy(run_id, row)
+            if mq: mq.publish_energy(row, label_for(row.freq_hz))
             activity[step.freq_hz] = 0.7 * activity.get(step.freq_hz, 0.0) + 0.3 * row.busy_frac
             n += 1
             if a.verbose or n % 50 == 0:
@@ -233,6 +241,11 @@ def _run_scan(a, kind: str) -> int:
     finally:
         signal.signal(signal.SIGINT, old); signal.signal(signal.SIGTERM, old_t)
         store.add_event(run_id, "stop", f"rows={n} failures={failures}")
+        if mq:
+            mq.publish_status({"run_id": run_id, "kind": kind, "profile": prof.name, "state": "stopped", "rows": n, "failures": failures, "mqtt_errors": mq.errors})
+            mq.close()
+            if mq.errors:
+                store.add_event(run_id, "mqtt_errors", str(mq.errors))
         try:
             radio.standby()
         except Exception:
@@ -368,6 +381,7 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--engine", choices=("poll", "scan"), default="poll", help="poll = host-polled GetRssiInst; scan = on-chip histogram (Semtech scan patch, experimental)")
         sp.add_argument("--nb-scan", type=int, default=None, help="samples per on-chip scan (engine=scan); default = dwell / 8.2 us, max 65535")
         sp.add_argument("--duration", default=None, help="stop after e.g. 15m, 2h, 3d")
+        sp.add_argument("--mqtt", default=None, help="publish rows to a broker: mqtt://[user:pass@]host[:port][/prefix] (needs paho-mqtt)")
         sp.add_argument("--fake-clock", action="store_true", help=argparse.SUPPRESS)
         sp.add_argument("-v", "--verbose", action="store_true")
         if kind == "quick":
@@ -398,7 +412,7 @@ def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
     try:
         return int(a.fn(a))
-    except (HalError, DeviceBusy, DeviceError, SxError, FileNotFoundError) as e:
+    except (HalError, DeviceBusy, DeviceError, SxError, FileNotFoundError, ValueError, RuntimeError) as e:
         print(f"lorascan: {e}", file=sys.stderr)
         return 1
 

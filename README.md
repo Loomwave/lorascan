@@ -12,11 +12,21 @@ phase 1 (P1): energy layer, quick and survey scans, SQLite store, HTML report, s
 
 ```
 sudo apt install python3-spidev python3-libgpiod
-pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.0/lorascan-0.1.0-py3-none-any.whl
+pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.2/lorascan-0.1.2-py3-none-any.whl
 # or from a checkout of https://github.com/Loomwave/lorascan :  pip install .   (developer: pip install -e .)
 ```
 Issues and results: https://github.com/Loomwave/lorascan/issues
-No other Python dependencies. Reports load plotly.js from cdnjs when opened in a browser.
+No other Python dependencies. Reports are self-contained HTML with static SVG charts that work offline; when the
+browser can reach cdnjs.cloudflare.com the same figures become interactive (plotly.js), and the page says which it is showing.
+Optional extras: `pip install paho-mqtt` for `--mqtt`.
+
+Debian packaging notes (for a future `apt install lorascan`): pure Python, `pyproject.toml` (setuptools), no compiled
+parts, runtime deps `python3-spidev` + `python3-libgpiod` (Recommends), `python3-paho-mqtt` (Suggests); the console
+script is `lorascan = lorascan.cli:main`; profiles live inside the package (`lorascan/profiles/*.yaml`) and are
+overridable from `/etc/lorascan/profiles/` and `~/.config/lorascan/profiles/`. `pipx install <wheel>` is the
+clean per-user install on a Pi whose system Python is externally managed (PEP 668): `sudo apt install pipx`,
+then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.2/lorascan-0.1.2-py3-none-any.whl`
+(`--system-site-packages` so the apt-installed spidev/gpiod modules are visible).
 
 ## Wire and describe your radio
 
@@ -72,6 +82,11 @@ lorascan status --db survey.db                 # runs, row counts, age of the la
 lorascan serve  --db survey.db --port 8080     # live report at http://<pi>:8080/ (re-rendered every 60 s)
 lorascan share  --db survey.db --cell 34.12,-84.38 --dry-run   # the opt-in community share file, to read before any upload
 ```
+Add `--mqtt mqtt://[user:pass@]broker[:1883][/prefix]` to any scan to publish every row to a broker as it is measured
+(needs `paho-mqtt`): `<prefix>/energy/<MHz>` per visit (floor/P50/P90/peak dBm, busy fraction, engine, n; no histogram),
+`<prefix>/cad/<MHz>/sf<SF>` per CAD sweep, `<prefix>/decode/<MHz>/<network>` per decode dwell (counts only),
+`<prefix>/status` retained. Prefix defaults to `lorascan/<hostname>`. A broker that is down at start fails the command
+before the radio is opened; a broker that drops mid-run is counted (`mqtt_errors` event) and never stops the scan.
 `--cad` adds Channel Activity Detection sweeps on the busy and known channels once per grid round, plus a
 200-CAD reference sweep on the quietest channel so the report can state the false-alarm rate. Only one
 lorascan may hold a radio at a time (a lock on the SPI device); a second one exits with a message.
