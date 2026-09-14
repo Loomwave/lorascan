@@ -27,6 +27,13 @@ lorascan probe    --profile my-board.yaml     # SPI first light: expects sync wo
 lorascan selftest --profile my-board.yaml     # init, device errors, two 2-second energy reads
 ```
 
+### CH341 USB-SPI sticks (MeshToad V3, PineDio-USB class) — experimental
+
+`pip install pyusb`, then `--profile meshtoad-v3-ch341` (profile `bus: {type: ch341, dev: auto}`; `dev`
+may name the stick's USB serial). The backend is a port of the Loomwave Rust CH341 driver (framing,
+pin map and the SCK/MOSI-must-be-outputs fix included) but has not yet been run against a stick from
+this tool; use `probe` first and report what you see. Add a udev rule for 1a86:5512 or run as root.
+
 ## Scan
 
 ```

@@ -27,4 +27,7 @@ def open_hal(profile) -> Hal:
     if profile.bus_type == "spidev":
         from .spidev_gpiod import SpidevGpiodHal
         return SpidevGpiodHal(profile)
-    raise HalError(f"unsupported bus type {profile.bus_type!r} (P1 supports: fake, spidev)")
+    if profile.bus_type == "ch341":
+        from .ch341 import Ch341Hal
+        return Ch341Hal(profile)
+    raise HalError(f"unsupported bus type {profile.bus_type!r} (supported: fake, spidev, ch341)")
