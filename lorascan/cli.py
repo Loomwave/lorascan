@@ -55,6 +55,10 @@ class _Stop(Exception):
     pass
 
 
+HAL_BACKOFF_S = [1, 2, 4, 8, 16]      # Loomwave/lorascan#6: bus-level recovery backoff per consecutive failure
+HAL_MAX_CONSECUTIVE = 5               # give up (hal_giveup event, clean stop) after this many failures in a row
+
+
 def cmd_probe(a) -> int:
     prof = _profile(a.profile)
     hal = open_hal(prof)
@@ -183,6 +187,7 @@ def _run_scan(a, kind: str) -> int:
         stopped["flag"] = True
     old = signal.signal(signal.SIGINT, _sig); old_t = signal.signal(signal.SIGTERM, _sig)
     n, failures = 0, 0
+    hal_consecutive = 0
     engine = a.engine
     scan_failures = 0
     nets = {nw.name: nw for nw in netmod.NETWORKS}
@@ -190,9 +195,13 @@ def _run_scan(a, kind: str) -> int:
         upload_patch(radio)
         print(f"[scan] scan patch uploaded; chip version string {version_string(radio)!r}")
     store.add_event(run_id, "start", f"{kind} grid={len(grid)} dwell={a.dwell} engine={engine}")
+    step_iter = iter(steps)
+    retry_step = None
     try:
-        for step in steps:
-            if stopped["flag"] or (limit is not None and clock() - t_start >= limit):
+        while True:
+            step = retry_step if retry_step is not None else next(step_iter, None)
+            retry_step = None
+            if step is None or stopped["flag"] or (limit is not None and clock() - t_start >= limit):
                 break
             ts = time.time() if not a.fake_clock else 1_700_000_000.0 + clock()
             try:
@@ -234,6 +243,37 @@ def _run_scan(a, kind: str) -> int:
                     radio.ensure_lora(step.freq_hz)
                     row = polled_energy(radio, step.freq_hz, step.bw_khz, step.dwell_s, clock=clock, sample_gap_s=a.sample_gap,
                                         busy_t_db=a.busy_t, offset_dbm=prof.scan_offset_dbm, ts=ts)
+            except (HalError, OSError) as e:
+                # bus-level failure (pyusb timeout / resource busy, spidev EIO): reopen the HAL, not just the chip (#6)
+                failures += 1
+                hal_consecutive += 1
+                store.add_event(run_id, "hal_error", f"{step.freq_hz} {e}")
+                print(f"[scan] bus error at {step.freq_hz/1e6:.3f} MHz: {e}; reopening the radio ({hal_consecutive}/{HAL_MAX_CONSECUTIVE})", file=sys.stderr)
+                if hal_consecutive >= HAL_MAX_CONSECUTIVE:
+                    store.add_event(run_id, "hal_giveup", f"{hal_consecutive} consecutive bus errors")
+                    print("[scan] giving up: the radio did not come back; stopping cleanly", file=sys.stderr)
+                    break
+                try:
+                    hal.close()
+                except Exception:
+                    pass
+                back = HAL_BACKOFF_S[min(hal_consecutive - 1, len(HAL_BACKOFF_S) - 1)]
+                (hal.sleep if a.fake_clock else time.sleep)(back)
+                try:
+                    if hal_consecutive >= 2 and hasattr(hal, "reset_device"):
+                        hal.reset_device()
+                    hal, radio = _open_radio(prof, step.freq_hz)
+                    if a.fake_clock:
+                        hal.sleep = lambda s: fake_clock.__setitem__(0, fake_clock[0] + s)  # type: ignore[attr-defined]
+                    if engine == "scan":
+                        upload_patch(radio)
+                    store.add_event(run_id, "hal_recovered", f"after {hal_consecutive} failure(s), {back} s backoff")
+                    hal_consecutive = 0
+                except (HalError, OSError, SxError, DeviceError, DeviceBusy) as e2:
+                    store.add_event(run_id, "hal_reopen_failed", str(e2))
+                    print(f"[scan] reopen failed: {e2}", file=sys.stderr)
+                retry_step = step                # the interrupted visit is measured again, not skipped
+                continue
             except SxError as e:
                 failures += 1
                 store.add_event(run_id, "radio_error", f"{step.freq_hz} {e}")

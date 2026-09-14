@@ -15,7 +15,9 @@ from . import HalError
 try:
     import usb.core as _usb_core   # pyusb, optional
     import usb.util as _usb_util
+    _USB_ERRORS: tuple = (_usb_core.USBError,)     # USBTimeoutError is a subclass
 except ImportError:                # pragma: no cover - exercised via monkeypatch in tests
+    _USB_ERRORS = (OSError,)
     _usb_core = None
     _usb_util = None
 
@@ -102,15 +104,40 @@ class Ch341Hal:
         self._push_uio()
 
     def _push_uio(self):
-        self.h.write(EP_OUT, uio_out_packet(self.levels, self.dirs))
+        self._w(uio_out_packet(self.levels, self.dirs))
+
+    # Every bulk transfer goes through these two so a pyusb USBTimeoutError / USBError ([Errno 110],
+    # [Errno 16] Resource busy, ...) surfaces as HalError and the scan loop can recover (Loomwave/lorascan#6).
+    def _w(self, data: bytes):
+        try:
+            return self.h.write(EP_OUT, data)
+        except _USB_ERRORS as e:
+            raise HalError(f"ch341 usb write: {e}") from e
+
+    def _r(self, n: int) -> bytes:
+        try:
+            return self.h.read(EP_IN, n)
+        except _USB_ERRORS as e:
+            raise HalError(f"ch341 usb read: {e}") from e
+
+    def reset_device(self) -> bool:
+        """USB port reset of the stick (clears a wedged controller without a host reboot); best effort."""
+        try:
+            dev = getattr(self.h, "dev", None)
+            if dev is not None and hasattr(dev, "reset"):
+                dev.reset()
+                return True
+        except Exception:
+            pass
+        return False
 
     def _set_pin(self, pin: int, high: bool):
         self.levels = (self.levels | (1 << pin)) if high else (self.levels & ~(1 << pin))
         self._push_uio()
 
     def _status0(self) -> int:
-        self.h.write(EP_OUT, bytes([CMD_GET_STATUS]))
-        buf = self.h.read(EP_IN, STATUS_LEN)
+        self._w(bytes([CMD_GET_STATUS]))
+        buf = self._r(STATUS_LEN)
         if not buf:
             raise HalError("ch341 status: empty response")
         return buf[0]
@@ -121,10 +148,10 @@ class Ch341Hal:
             out = bytearray()
             for pkt in spi_stream_packets(bytes(tx)):
                 n = len(pkt) - 1
-                self.h.write(EP_OUT, pkt)
+                self._w(pkt)
                 got = bytearray()
                 while len(got) < n:
-                    chunk = self.h.read(EP_IN, n - len(got))
+                    chunk = self._r(n - len(got))
                     if not chunk:
                         raise HalError("ch341 spi: short read")
                     got += chunk
