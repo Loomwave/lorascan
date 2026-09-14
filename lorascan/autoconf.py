@@ -122,22 +122,68 @@ def resolve_meshtasticd(root: str = "/etc/meshtasticd", config: str | None = Non
 
 def resolve_openhop(config: str = "/etc/openhop_repeater/config.yaml", run=None) -> Resolved:
     d = parse_yaml(open(config).read())
-    ch = d.get("ch341")
-    if not isinstance(ch, dict):
-        raise AutoConfError(f"{config}: no ch341: block (openHOP's radio is a CH341 USB stick)")
-    vid, pid = ch.get("vid", 0x1A86), ch.get("pid", 0x5512)
-    vid = int(vid, 0) if isinstance(vid, str) else int(vid); pid = int(pid, 0) if isinstance(pid, str) else int(pid)
-    base = load_profile("meshtoad-v3-ch341")
-    prof = BoardProfile(name="auto-openhop", bus_type="ch341", bus_dev="auto", bus_hz=0, pins=dict(base.pins), tcxo_v=base.tcxo_v,
-                        dio2_rf_switch=base.dio2_rf_switch, rx_boosted=True, max_tx_dbm=-9)
-    r = Resolved(prof, "openhop-repeater.service", config, usb=(vid, pid), device="usb")
+    radio_type = str(d.get("radio_type", "")).strip().lower()
+    # openHOP configs before radio_type, or those omitting it, still declare the radio via
+    # the ch341 block — treat that as sx1262_ch341 so an old config keeps resolving.
+    if not radio_type and isinstance(d.get("ch341"), dict):
+        radio_type = "sx1262_ch341"
+    # Decide by radio_type (the authoritative signal from openHOP's config), NOT by the
+    # presence of a `ch341:` block — a node that migrated from USB to a SPI SX1262 keeps
+    # a vestigial ch341 block that no longer describes the radio (FRNebra is this case).
+    if radio_type == "sx1262":
+        sx = d.get("sx1262")
+        if not isinstance(sx, dict):
+            raise AutoConfError(f"{config}: radio_type sx1262 but no sx1262: block")
+        bus_id = int(sx.get("bus_id", 0)); cs_id = int(sx.get("cs_id", 0))
+        bus_dev = f"/dev/spidev{bus_id}.{cs_id}"
+        pins = {"nss": "kernel", "reset": sx.get("reset_pin"), "busy": sx.get("busy_pin"),
+                "dio1": sx.get("irq_pin"), "rxen": sx.get("rxen_pin"), "txen": sx.get("txen_pin")}
+        for k in ("reset", "busy", "dio1"):
+            if pins[k] is None or int(pins[k]) < 0:
+                raise AutoConfError(f"{config}: sx1262 block lacks a usable {k} pin (got {pins[k]})")
+        for k in ("rxen", "txen"):
+            if pins[k] is None or int(pins[k]) < 0:
+                pins[k] = None
+        pins = {k: (int(v) if isinstance(v, (int, float)) and v >= 0 else v) for k, v in pins.items()}
+        if isinstance(sx.get("cs_pin"), (int, float)) and int(sx["cs_pin"]) >= 0:
+            pins["nss"] = int(sx["cs_pin"])   # software CE override
+        tcxo = sx.get("dio3_tcxo_voltage", 1.8)
+        dio2 = sx.get("use_dio2_rf", True)
+        prof = BoardProfile(name="auto-openhop", bus_type="spidev", bus_dev=bus_dev, bus_hz=2_000_000,
+                            pins=pins, tcxo_v=float(tcxo), dio2_rf_switch=bool(dio2), rx_boosted=True, max_tx_dbm=-9)
+        r = Resolved(prof, "openhop-repeater.service", config, device=bus_dev)
+        radio = d.get("radio") or {}
+        if isinstance(radio, dict) and radio.get("frequency"):
+            r.notes.append(f"openHOP radio: {float(radio['frequency'])/1e6:.3f} MHz SF{radio.get('spreading_factor')}/BW{radio.get('bandwidth',0)/1e3:.0f}k cr{radio.get('coding_rate')} preamble {radio.get('preamble_length')} (site channel — scan is whole-band)")
+        _openhop_location(d, r)
+        return r
+    if radio_type == "sx1262_ch341":
+        ch = d.get("ch341")
+        if not isinstance(ch, dict):
+            raise AutoConfError(f"{config}: radio_type sx1262_ch341 but no ch341: block")
+        vid, pid = ch.get("vid", 0x1A86), ch.get("pid", 0x5512)
+        vid = int(vid, 0) if isinstance(vid, str) else int(vid); pid = int(pid, 0) if isinstance(pid, str) else int(pid)
+        base = load_profile("meshtoad-v3-ch341")
+        prof = BoardProfile(name="auto-openhop", bus_type="ch341", bus_dev="auto", bus_hz=0, pins=dict(base.pins), tcxo_v=base.tcxo_v,
+                            dio2_rf_switch=base.dio2_rf_switch, rx_boosted=True, max_tx_dbm=-9)
+        r = Resolved(prof, "openhop-repeater.service", config, usb=(vid, pid), device="usb")
+        _openhop_location(d, r)
+        return r
+    raise AutoConfError(f"{config}: radio_type {radio_type!r} is unsupported for auto-scan "
+                        "(supported: sx1262 SPI, sx1262_ch341 USB; kiss/modem modes have no SX126x)")
+
+
+def _openhop_location(d: dict, r: Resolved) -> None:
     gps = d.get("gps") or {}
     loc = gps.get("location") if isinstance(gps.get("location"), dict) else None
     if loc and loc.get("lat") is not None and loc.get("lon") is not None:
         r.location = (float(loc["lat"]), float(loc["lon"]), "openhop config gps.location")
     elif isinstance(d.get("location"), dict) and d["location"].get("lat") is not None:
         r.location = (float(d["location"]["lat"]), float(d["location"]["lon"]), "openhop config location")
-    return r
+    # FRNebra-style: repeater.{latitude,longitude} doubles as the config-location fallback
+    rep = d.get("repeater") or {}
+    if r.location is None and isinstance(rep, dict) and rep.get("latitude") is not None and rep.get("longitude") is not None:
+        r.location = (float(rep["latitude"]), float(rep["longitude"]), "openhop repeater latitude/longitude")
 
 
 def resolve(source: str, root: str | None = None, config: str | None = None, run=None) -> Resolved:
