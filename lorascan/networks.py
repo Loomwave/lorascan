@@ -83,7 +83,7 @@ def presets_on(freq_hz: int, tol_hz: int = 1_000) -> list[tuple[str, Preset]]:
         for p in n.presets:
             if p.slot_bw_hz:
                 k = round((freq_hz - US_START_HZ - p.slot_bw_hz / 2) / p.slot_bw_hz)
-                if 0 <= k < meshtastic_num_slots(p.slot_bw_hz) and abs(meshtastic_slot_freq_hz(k, p.slot_bw_hz) - freq_hz) <= tol_hz:
+                if 0 <= k < meshtastic_num_slots(p.slot_bw_hz) and abs(meshtastic_slot_freq_hz(k + 1, p.slot_bw_hz) - freq_hz) <= tol_hz:
                     out.append((n.name, p))
             elif any(abs(f - freq_hz) <= tol_hz for f in p.freqs_hz):
                 out.append((n.name, p))
