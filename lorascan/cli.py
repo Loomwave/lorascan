@@ -70,6 +70,14 @@ def cmd_selftest(a) -> int:
     try:
         errs = radio.device_errors()
         print(f"[selftest] init OK, device errors 0x{errs:04X}, chip status 0x{radio.chip_status():02X}")
+        if getattr(a, "engine", "poll") == "scan":
+            try:
+                upload_patch(radio)
+                row = scan_energy(radio, 915_000_000, 125, nb_scan=2048, offset_dbm=prof.scan_offset_dbm)
+                print(f"[selftest] scan engine: patch uploaded (version {version_string(radio)!r}), 915.000 MHz histogram of {row.n} samples, floor {row.floor_dbm:.0f} p90 {row.p90:.0f} peak {row.peak:.0f} dBm")
+            except (ScanError, SxError) as e:
+                print(f"[selftest] scan engine unavailable on this radio ({e}); the polled engine still works", file=sys.stderr)
+            radio.init(915_000_000)
         for f in (902_500_000, 911_500_000):
             row = polled_energy(radio, f, 125, a.dwell, sample_gap_s=a.sample_gap)
             good = row.n >= 10 and -126 < row.floor_dbm < -1
@@ -290,7 +298,8 @@ def cmd_report(a) -> int:
             prof_offset = load_profile(runs[-1]["profile"]).rssi_offset_db if runs and runs[-1]["profile"] not in ("fake",) else 0.0
         except FileNotFoundError:
             prof_offset = 0.0
-    render_report(store, a.out, title=a.title, run_id=a.run, bucket_s=a.bucket, rssi_offset_db=prof_offset)
+    since = (time.time() - _duration(a.since)) if a.since else None
+    render_report(store, a.out, title=a.title, run_id=a.run, bucket_s=a.bucket, rssi_offset_db=prof_offset, since=since)
     print(f"[report] wrote {a.out}")
     return 0
 
@@ -337,7 +346,7 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--sample-gap", type=float, default=0.0007, help="seconds between RSSI polls")
 
     sp = sub.add_parser("probe", help="first-light SPI check (reset, GetStatus, sync-word read)"); sp.add_argument("--profile", default="generic-spidev"); sp.set_defaults(fn=cmd_probe)
-    sp = sub.add_parser("selftest", help="init + two short energy reads"); radio_args(sp); sp.set_defaults(fn=cmd_selftest)
+    sp = sub.add_parser("selftest", help="init + two short energy reads (+ one on-chip scan with --engine scan)"); radio_args(sp); sp.add_argument("--engine", choices=("poll", "scan"), default="poll"); sp.set_defaults(fn=cmd_selftest)
     sc = sub.add_parser("scan", help="run a scan plan"); ssub = sc.add_subparsers(dest="plan", required=True)
     plans = {"quick": ssub, "survey": ssub, "watch": ssub, "test": sub}
     for kind, parent in plans.items():
@@ -374,7 +383,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("serve", help="live web page of a database (for a running survey)"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--host", default="0.0.0.0"); sp.add_argument("--port", type=int, default=8080); sp.add_argument("--refresh", type=int, default=60); sp.set_defaults(fn=cmd_serve)
     sp = sub.add_parser("status", help="runs, row counts and last-row age in a database"); sp.add_argument("--db", default="lorascan.db"); sp.set_defaults(fn=cmd_status)
     sp = sub.add_parser("report"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--out", default="lorascan-report.html"); sp.add_argument("--title", default="lorascan report")
-    sp.add_argument("--run", type=int, default=None); sp.add_argument("--bucket", type=int, default=None, help="heat map bucket seconds (default: auto, <= 600 columns)"); sp.add_argument("--rssi-offset", type=float, default=None); sp.set_defaults(fn=cmd_report)
+    sp.add_argument("--run", type=int, default=None); sp.add_argument("--since", default=None, help="only the last e.g. 6h / 2d"); sp.add_argument("--bucket", type=int, default=None, help="heat map bucket seconds (default: auto, <= 600 columns)"); sp.add_argument("--rssi-offset", type=float, default=None); sp.set_defaults(fn=cmd_report)
     sp = sub.add_parser("export"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--csv", required=True); sp.add_argument("--run", type=int, default=None); sp.set_defaults(fn=cmd_export)
     sp = sub.add_parser("share", help="write the opt-in community share file (aggregates + coarse cell; no upload yet)")
     sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--out", default="lorascan-share.json"); sp.add_argument("--run", type=int, default=None)

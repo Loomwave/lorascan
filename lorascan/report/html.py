@@ -28,17 +28,17 @@ def auto_bucket_s(span_s: float, max_cols: int = 600) -> int:
     return 3600
 
 
-def build_data(store, run_id=None, bucket_s: int | None = 60, rssi_offset_db: float = 0.0) -> dict:
+def build_data(store, run_id=None, bucket_s: int | None = 60, rssi_offset_db: float = 0.0, since: float | None = None) -> dict:
     if not bucket_s:
         rs = [r for r in store.runs() if (run_id is None or r["id"] == run_id) and r["first_ts"]]
         span = (max(r["last_ts"] for r in rs) - min(r["first_ts"] for r in rs)) if rs else 0.0
         bucket_s = auto_bucket_s(span)
-    chans = store.channel_summary(run_id)
+    chans = store.channel_summary(run_id, since)
     for c in chans:
         c["label"] = label_for(c["freq_hz"])
         c["mhz"] = c["freq_hz"] / 1e6
     freqs = [c["freq_hz"] for c in chans]
-    tb = store.time_buckets(bucket_s, run_id)
+    tb = store.time_buckets(bucket_s, run_id, since)
     buckets = sorted({b["bucket"] for b in tb})
     idx_f = {f: i for i, f in enumerate(freqs)}
     idx_b = {b: i for i, b in enumerate(buckets)}
@@ -60,14 +60,14 @@ def build_data(store, run_id=None, bucket_s: int | None = 60, rssi_offset_db: fl
             when[wd][h] = round(s / n, 4)
     runs = store.runs()
     # LoRa presence (CAD) per frequency x SF, and decoded networks per frequency
-    cads = store.cad_summary(run_id)
+    cads = store.cad_summary(run_id, since)
     sfs = sorted({c["sf"] for c in cads})
     cad_freqs = sorted({c["freq_hz"] for c in cads})
     z = [[None] * len(sfs) for _ in cad_freqs]
     for c in cads:
         i, j = cad_freqs.index(c["freq_hz"]), sfs.index(c["sf"])
         z[i][j] = round(max(c["hit_rate"], z[i][j] or 0.0), 4)      # best bandwidth per (freq, sf)
-    decs = store.decode_summary(run_id)
+    decs = store.decode_summary(run_id, since)
     dec_by_f: dict[int, list] = {}
     for d in decs:
         if d["n_ok"]:
@@ -155,8 +155,8 @@ if(D.span_s>3600){{document.getElementById('when-wrap').hidden=false;Plotly.newP
 """
 
 
-def render_report(store, out_path: str, title: str = "lorascan report", run_id=None, bucket_s: int | None = None, rssi_offset_db: float = 0.0) -> str:
-    d = build_data(store, run_id, bucket_s, rssi_offset_db)
+def render_report(store, out_path: str, title: str = "lorascan report", run_id=None, bucket_s: int | None = None, rssi_offset_db: float = 0.0, since: float | None = None) -> str:
+    d = build_data(store, run_id, bucket_s, rssi_offset_db, since)
     bucket_s = d["heat"]["bucket_s"]
     dec_of = {c["freq_hz"]: c.get("decoded", "") for c in d["channels"]}
     rows = "".join(
