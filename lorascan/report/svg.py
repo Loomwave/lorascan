@@ -37,6 +37,26 @@ def level_colour(v, vmin, vmax) -> str:
     return "#fde725"
 
 
+MAX_COLS = 240   # columns in the static heat map; longer runs merge adjacent buckets (mean of measured cells)
+
+
+def merge_columns(buckets: list, z: list, max_cols: int = MAX_COLS) -> tuple[list, list, int]:
+    """Merge adjacent time buckets so the map has at most max_cols columns. Returns (buckets, z, per)."""
+    m = len(buckets)
+    if m <= max_cols:
+        return buckets, z, 1
+    per = -(-m // max_cols)
+    nb = [buckets[j] for j in range(0, m, per)]
+    nz = []
+    for row in z:
+        out = []
+        for j in range(0, m, per):
+            vals = [v for v in row[j:j + per] if v is not None]
+            out.append(round(sum(vals) / len(vals), 4) if vals else None)
+        nz.append(out)
+    return nb, nz, per
+
+
 def _txt(x, y, s, size=11, anchor="start", extra=""):
     return f'<text x="{x:.1f}" y="{y:.1f}" font-size="{size}" text-anchor="{anchor}" fill="currentColor" {extra}>{html.escape(str(s))}</text>'
 
@@ -48,6 +68,7 @@ def heatmap_svg(heat: dict, layer: str = "busy", width: int = 1060) -> str:
     z = heat.get(layer) or []
     if not freqs or not buckets or not z:
         return ""
+    buckets, z, per = merge_columns(buckets, z)
     ml, mr, mt, mb = 62, 70, 24, 40
     cell_h = max(3, min(14, int(560 / len(freqs))))
     ph = cell_h * len(freqs)
@@ -82,7 +103,8 @@ def heatmap_svg(heat: dict, layer: str = "busy", width: int = 1060) -> str:
         if j == 0 and len(b) >= 10:
             lab = b[:10] + " " + lab
         out.append(_txt(ml + j * cell_w + cell_w / 2, mt + ph + 16, lab, 10, "middle"))
-    out.append(_txt(ml + pw / 2, mt + ph + 32, "time (UTC)", 11, "middle"))
+    note = "time (UTC)" if per == 1 else f"time (UTC); {per} buckets of {heat.get('bucket_s', '?')} s merged per column"
+    out.append(_txt(ml + pw / 2, mt + ph + 32, note, 11, "middle"))
     # colour bar
     cx = width - mr + 16
     steps = 20
