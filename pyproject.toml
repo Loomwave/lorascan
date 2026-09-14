@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lorascan"
+version = "0.1.0"
+description = "LoRa-chipset band scanner and interference heat map for 902-928 MHz (SX1262 on Debian)"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+spidev = ["spidev>=3.5", "gpiod>=1.6"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+lorascan = "lorascan.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["lorascan*"]
+
+[tool.setuptools.package-data]
+lorascan = ["../profiles/*.yaml"]
