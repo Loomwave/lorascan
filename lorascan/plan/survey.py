@@ -28,7 +28,17 @@ def survey_plan(grid: list[int], dwell_s: float = 0.4, revisit_max_s: float = 60
             # nothing is due: revisit the oldest tenth so time-resolution is spent, not wasted
             due = sorted(grid, key=lambda f: last.get(f, -1e18))[: n_hot]
         hot = sorted((f for f in grid if activity.get(f, 0.0) > 0.0), key=lambda f: -activity[f])[: n_hot]
-        order = due + [f for f in hot if f not in due]
-        for f in order:
+        # interleave the hot channels through the round so they get time resolution, capped so they
+        # never take more than a third of the steps
+        stride = max(8, 2 * len(hot))
+        for i, f in enumerate(due):
             yield Step(f, bw_khz, dwell_s)
             last[f] = clock()
+            if hot and (i + 1) % stride == 0:
+                for h in hot:
+                    yield Step(h, bw_khz, dwell_s)
+                    last[h] = clock()
+        for h in hot:
+            if h not in due:
+                yield Step(h, bw_khz, dwell_s)
+                last[h] = clock()
