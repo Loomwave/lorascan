@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.7 — 2026-09-14
+- `--bw 62,125,250,500` on quick/survey: every width measured back to back per channel in one run (#2 item 1).
+- `--cad-grid 500000` on quick/survey: a CAD sweep over the centre of every window once per grid round at each `--sfs` × `--bws` pair, i.e. dense whole-band LoRa detection independent of sync word (#2 item 2).
+- User network table `~/.config/lorascan/networks.yaml` (or `--networks FILE`), one preset per line, merged over the built-in table; a user preset with a built-in name replaces it (#2 item 4).
+
 ## 0.1.6 — 2026-09-14
 - LoRaWAN US915 decode covers all uplink data rates DR0–DR3 (SF10/9/8/7 @125 on the 64-channel raster) and DR4 (SF8 @500), plus downlinks DR8–DR13 (SF12…SF7 @500, inverted IQ, no PHY CRC: counted on RxDone with a valid header). Presets gain `invert_iq`. (Loomwave/lorascan#4, wehooper4)
 - `report --slot 500000` / `export --table slots --slot 500000`: N kHz window view over existing rows — worst floor, peak, busiest channel, highest CAD hit rate and SF, decoded networks per window, best first. (#2 item 3)
