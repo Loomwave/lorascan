@@ -1,10 +1,11 @@
 Metadata-Version: 2.4
 Name: lorascan
-Version: 0.1.12
+Version: 0.1.13
 Summary: LoRa-chipset band scanner and interference heat map for 902-928 MHz (SX1262 on Debian)
 License: Apache-2.0
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
+License-File: LICENSE
 Provides-Extra: spidev
 Requires-Dist: spidev>=3.5; extra == "spidev"
 Requires-Dist: gpiod>=1.6; extra == "spidev"
@@ -12,6 +13,7 @@ Provides-Extra: mqtt
 Requires-Dist: paho-mqtt>=1.6; extra == "mqtt"
 Provides-Extra: dev
 Requires-Dist: pytest>=7; extra == "dev"
+Dynamic: license-file
 
 # lorascan
 
@@ -27,7 +29,7 @@ phase 1 (P1): energy layer, quick and survey scans, SQLite store, HTML report, s
 
 ```
 sudo apt install python3-spidev python3-libgpiod
-pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.12/lorascan-0.1.12-py3-none-any.whl
+pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.13/lorascan-0.1.13-py3-none-any.whl
 # or from a checkout of https://github.com/Loomwave/lorascan :  pip install .   (developer: pip install -e .)
 ```
 Issues and results: https://github.com/Loomwave/lorascan/issues
@@ -40,7 +42,7 @@ parts, runtime deps `python3-spidev` + `python3-libgpiod` (Recommends), `python3
 script is `lorascan = lorascan.cli:main`; profiles live inside the package (`lorascan/profiles/*.yaml`) and are
 overridable from `/etc/lorascan/profiles/` and `~/.config/lorascan/profiles/`. `pipx install <wheel>` is the
 clean per-user install on a Pi whose system Python is externally managed (PEP 668): `sudo apt install pipx`,
-then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.12/lorascan-0.1.12-py3-none-any.whl`
+then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.13/lorascan-0.1.13-py3-none-any.whl`
 (`--system-site-packages` so the apt-installed spidev/gpiod modules are visible).
 
 ## Wire and describe your radio
@@ -183,7 +185,7 @@ another SF in the same window and the band summary for a peak near the top of th
 ## Running your own share endpoint
 
 The community endpoint is a small stdlib server in this package: `lorascan-share-server --db /data/share.sqlite --port 8081`
-(routes `/healthz`, `/v1/watermark`, `/v1/share`, `/v1/stats`; idempotent upserts; 4 MB gzip / 64 MB inflated / 60 POST per
+(routes `/` = the community map page, `/v1/map.json`, `/healthz`, `/v1/watermark`, `/v1/share`, `/v1/stats`; idempotent upserts; 4 MB gzip / 64 MB inflated / 60 POST per
 hour per submitter; miscalibrated documents stored flagged). `deploy/share-server/` has a Dockerfile, a Kubernetes manifest,
 a systemd unit and the handover README; the protocol is documented in the Loomwave repo
 (`docs/superpowers/specs/2026-09-14-lorascan-share-endpoint.md`). A regional group can run one for itself; the public one is

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.14 — 2026-09-14
+- Community map page: OpenStreetMap basemap via Leaflet (cdnjs) as a progressive enhancement — cells drawn as coloured rectangles from `/v1/map.json` with popups (dashed = single submitter), OSM attribution; the inline SVG grid stays and is only hidden once a real tile has rendered with Leaflet's stylesheet applied, so a blocked CDN or tile server leaves the full data visible.
+
 ## 0.1.13 — 2026-09-14
 - First front end for the community endpoint: `GET /` on `lorascan-share-server` renders the fleet map page (0.1° cells coloured by mean busy fraction, single-submitter cells hatched, each cell linking to OpenStreetMap; band summary across submitters; fleet-wide quietest channels; hour×weekday matrix from hour-granularity uploads; cells and submitters tables) as self-contained HTML with inline SVG — no JavaScript, no CDN. `GET /v1/map.json` returns the aggregates behind it. Flagged (miscalibrated) uploads are counted but never merged.
 
