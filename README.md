@@ -123,6 +123,15 @@ COMPLETED flag until the new scan is running, so the tool waits the nominal scan
 and rejects any histogram whose sample count is not the requested one. If the engine fails twice the
 scan falls back to polling and says so.
 
+## FAQ
+
+**Can it listen with LoRa instead of GFSK?** It does by default. `--engine poll` initialises the SX1262 in LoRa
+mode and reads RSSI in LoRa RX; only `--engine scan` switches to GFSK, because Semtech's spectral-scan patch
+only runs under the GFSK receiver (the histogram is wideband energy through the RX filter, so the dBm mean the
+same thing either way). Energy in any modem cannot tell LoRa from noise: to *detect LoRa* add `--cad` (Channel
+Activity Detection with the real LoRa demodulator per SF/BW) or use `scan watch` / `test`, which also passively
+decode against the known-network presets. The report's "LoRa presence by spreading factor" panel comes from those.
+
 ## Validated on
 
 - 2026-09-14, Loomwave bench Raspberry Pi 5 (Debian 12, Python 3.11, python3-spidev 3.5,
