@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse
 import csv
+import json
 import os
 import signal
 import sys
@@ -25,7 +26,7 @@ from .measure.decode import decode_dwell
 from .networks import NETWORKS, presets_on
 from .store.db import Store
 from .report.html import render_report
-from .share import build_share, write_share, coarse_cell, submitter_token, DEFAULT_CELL_DEG
+from .share import build_share, write_share, coarse_cell, submitter_token, DEFAULT_CELL_DEG, SHARE_FORMAT, choose_by_budget, parse_budget, upload_share, gzip_bytes
 
 
 def _profile(name: str) -> BoardProfile:
@@ -361,12 +362,34 @@ def cmd_share(a) -> int:
         offset = a.rssi_offset if a.rssi_offset is not None else (load_profile(profile_name).rssi_offset_db if profile_name != "fake" else 0.0)
     except FileNotFoundError:
         offset = 0.0
-    doc = build_share(store, cell, submitter_token(a.token_path), profile_name, offset, a.cell_size, a.run)
+    token = submitter_token(a.token_path)
+    if a.budget:
+        doc, size = choose_by_budget(store, cell, token, profile_name, parse_budget(a.budget), offset, a.cell_size, a.run)
+        print(f"[share] budget {a.budget}: chose granularity={doc['granularity']} tables={'energy' + (',cad,decode' if doc['cad'] or doc['decode'] else '')} ({size} bytes gzipped for the whole span)")
+    else:
+        doc = build_share(store, cell, token, profile_name, offset, a.cell_size, a.run, granularity=a.granularity)
     write_share(doc, a.out)
-    print(f"[share] wrote {a.out}: {len(doc['energy'])} energy aggregates, {len(doc['cad'])} CAD rows, {len(doc['decode'])} decode rows, cell={doc['cell']}")
-    if not a.dry_run:
-        print("[share] upload is not available yet (the lorascan.app endpoint is a later phase); the file above is what would be sent", file=sys.stderr)
+    print(f"[share] wrote {a.out}: {len(doc['energy'])} energy aggregates ({doc['granularity']}), {len(doc['cad'])} CAD rows, {len(doc['decode'])} decode rows, cell={doc['cell']}; {len(gzip_bytes(doc))} bytes gzipped")
+    if a.dry_run or not a.to:
+        if not a.dry_run:
+            print("[share] no --to given: nothing uploaded; send the file later with `lorascan upload FILE --to URL`", file=sys.stderr)
+        return 0
+    return _upload(doc, a.to)
+
+
+def _upload(doc: dict, to: str) -> int:
+    r = upload_share(doc, to)
+    print(f"[share] uploaded to {to}: sent {r['sent']} energy aggregates ({r['bytes']} bytes gzipped), skipped {r['skipped']} already at the endpoint (watermark {r['watermark']}), accepted {r.get('accepted')}, attempts {r['attempts']}")
     return 0
+
+
+def cmd_upload(a) -> int:
+    """Store-and-forward: upload a share file written earlier, from any machine (the submitter token is inside)."""
+    with open(a.file) as f:
+        doc = json.load(f)
+    if doc.get("format") != SHARE_FORMAT:
+        raise ValueError(f"{a.file}: format {doc.get('format')!r}, this lorascan sends {SHARE_FORMAT}")
+    return _upload(doc, a.to)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -426,7 +449,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--cell", default=None, help="lat,lon of the antenna; rounded to --cell-size degrees (omit for no location)")
     sp.add_argument("--cell-size", type=float, default=DEFAULT_CELL_DEG); sp.add_argument("--rssi-offset", type=float, default=None)
     sp.add_argument("--token-path", default=os.path.expanduser("~/.config/lorascan/token")); sp.add_argument("--dry-run", action="store_true")
+    sp.add_argument("--granularity", choices=("hour", "day"), default="hour", help="aggregate per hour (~53 KB/day gzipped) or per day (~3 KB/day)")
+    sp.add_argument("--budget", default=None, help="bytes per day of survey, e.g. 20k/day: picks the coarsest document that fits")
+    sp.add_argument("--to", default=None, help="upload endpoint, e.g. https://share.lorascan.app (gzip, incremental; omit to only write the file)")
     sp.set_defaults(fn=cmd_share)
+    sp = sub.add_parser("upload", help="upload a share file written earlier (store-and-forward from any machine)")
+    sp.add_argument("file"); sp.add_argument("--to", required=True); sp.set_defaults(fn=cmd_upload)
     return p
 
 

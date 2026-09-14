@@ -12,7 +12,7 @@ phase 1 (P1): energy layer, quick and survey scans, SQLite store, HTML report, s
 
 ```
 sudo apt install python3-spidev python3-libgpiod
-pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.3/lorascan-0.1.3-py3-none-any.whl
+pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.4/lorascan-0.1.4-py3-none-any.whl
 # or from a checkout of https://github.com/Loomwave/lorascan :  pip install .   (developer: pip install -e .)
 ```
 Issues and results: https://github.com/Loomwave/lorascan/issues
@@ -25,7 +25,7 @@ parts, runtime deps `python3-spidev` + `python3-libgpiod` (Recommends), `python3
 script is `lorascan = lorascan.cli:main`; profiles live inside the package (`lorascan/profiles/*.yaml`) and are
 overridable from `/etc/lorascan/profiles/` and `~/.config/lorascan/profiles/`. `pipx install <wheel>` is the
 clean per-user install on a Pi whose system Python is externally managed (PEP 668): `sudo apt install pipx`,
-then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.3/lorascan-0.1.3-py3-none-any.whl`
+then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.4/lorascan-0.1.4-py3-none-any.whl`
 (`--system-site-packages` so the apt-installed spidev/gpiod modules are visible).
 
 ## Wire and describe your radio
@@ -82,6 +82,17 @@ lorascan status --db survey.db                 # runs, row counts, age of the la
 lorascan serve  --db survey.db --port 8080     # live report at http://<pi>:8080/ (re-rendered every 60 s)
 lorascan share  --db survey.db --cell 34.12,-84.38 --dry-run   # the opt-in community share file, to read before any upload
 ```
+
+### Sharing on a thin or absent uplink
+
+The share file is aggregates only and is sent gzipped: 130 channels at hour granularity is about 53 KB per day,
+`--granularity day` (per-channel day rows plus a 7×24 hour-of-day × weekday matrix) about 3 KB per day. Uploads are
+incremental and idempotent: `share --to URL` first asks the endpoint which bucket it already holds for your submitter
+token and sends only that bucket and later ones, so a dropped link costs one small retry, never a re-send of the
+run. `--budget 20k/day` picks the coarsest document that fits (hour → day → day without the CAD/decode tables).
+A site with no uplink at all writes the file and uploads it later from any machine: `lorascan upload FILE --to URL`
+(the submitter token is inside the file). The community endpoint (share.lorascan.app) is being deployed; until it is
+live, `share` without `--to` just writes the file. Protocol: docs/superpowers/specs/2026-09-14-lorascan-share-endpoint.md
 Add `--mqtt mqtt://[user:pass@]broker[:1883][/prefix]` to any scan to publish every row to a broker as it is measured
 (needs `paho-mqtt`): `<prefix>/energy/<MHz>` per visit (floor/P50/P90/peak dBm, busy fraction, engine, n; no histogram),
 `<prefix>/cad/<MHz>/sf<SF>` per CAD sweep, `<prefix>/decode/<MHz>/<network>` per decode dwell (counts only),
