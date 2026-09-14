@@ -37,7 +37,7 @@ def decode_dwell(radio, freq_hz: int, network: Network, preset: Preset, dwell_s:
     radio.ensure_lora(freq_hz)
     radio.set_lora(preset.sf, preset.bw_khz, preset.cr)
     radio.set_sync_word(network.sync_word)
-    radio.set_packet_params_lora(preamble=preset.preamble, payload_len=0xFF, crc_on=preset.crc_on)
+    radio.set_packet_params_lora(preamble=preset.preamble, payload_len=0xFF, crc_on=preset.crc_on, invert_iq=preset.invert_iq)
     radio.set_frequency(freq_hz)
     radio.set_irq_mask(IRQ_ALL)
     radio.clear_irq()
