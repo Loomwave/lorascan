@@ -23,3 +23,13 @@ def test_quick_with_cad_adds_cad_rows(tmp_path):
     assert rc == 0
     s = Store(db)
     assert len(list(s.iter_energy())) == 144 and len(list(s.iter_cad())) >= 14 * 2   # known channels x (sf,bw) pairs at least
+
+def test_share_dry_run_writes_the_file(tmp_path):
+    db = str(tmp_path / "q.db")
+    assert cli.main(["scan", "quick", "--profile", "fake", "--db", db, "--passes", "1", "--dwell", "0.005", "--sample-gap", "0.001"]) == 0
+    out = str(tmp_path / "share.json")
+    rc = cli.main(["share", "--db", db, "--out", out, "--cell", "34.1234,-84.3789", "--token-path", str(tmp_path / "tok"), "--dry-run"])
+    assert rc == 0
+    import json
+    d = json.load(open(out))
+    assert d["format"].startswith("lorascan-share/") and d["cell"] == {"lat": 34.1, "lon": -84.4, "size_deg": 0.1} and len(d["energy"]) > 0

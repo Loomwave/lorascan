@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse
 import csv
+import os
 import signal
 import sys
 import time
@@ -22,6 +23,7 @@ from .measure.decode import decode_dwell
 from .networks import NETWORKS, presets_on
 from .store.db import Store
 from .report.html import render_report
+from .share import build_share, write_share, coarse_cell, submitter_token, DEFAULT_CELL_DEG
 
 
 def _profile(name: str) -> BoardProfile:
@@ -249,6 +251,26 @@ def cmd_export(a) -> int:
     return 0
 
 
+def cmd_share(a) -> int:
+    store = Store(a.db)
+    cell = None
+    if a.cell:
+        lat, lon = (float(x) for x in a.cell.split(","))
+        cell = coarse_cell(lat, lon, a.cell_size)
+    runs = store.runs()
+    profile_name = runs[-1]["profile"] if runs else "unknown"
+    try:
+        offset = a.rssi_offset if a.rssi_offset is not None else (load_profile(profile_name).rssi_offset_db if profile_name != "fake" else 0.0)
+    except FileNotFoundError:
+        offset = 0.0
+    doc = build_share(store, cell, submitter_token(a.token_path), profile_name, offset, a.cell_size, a.run)
+    write_share(doc, a.out)
+    print(f"[share] wrote {a.out}: {len(doc['energy'])} energy aggregates, {len(doc['cad'])} CAD rows, {len(doc['decode'])} decode rows, cell={doc['cell']}")
+    if not a.dry_run:
+        print("[share] upload is not available yet (the lorascan.app endpoint is a later phase); the file above is what would be sent", file=sys.stderr)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="lorascan", description="LoRa-chipset band scanner for 902-928 MHz (receive-only)")
     p.add_argument("--version", action="version", version=__version__)
@@ -294,6 +316,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("report"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--out", default="lorascan-report.html"); sp.add_argument("--title", default="lorascan report")
     sp.add_argument("--run", type=int, default=None); sp.add_argument("--bucket", type=int, default=60); sp.add_argument("--rssi-offset", type=float, default=None); sp.set_defaults(fn=cmd_report)
     sp = sub.add_parser("export"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--csv", required=True); sp.add_argument("--run", type=int, default=None); sp.set_defaults(fn=cmd_export)
+    sp = sub.add_parser("share", help="write the opt-in community share file (aggregates + coarse cell; no upload yet)")
+    sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--out", default="lorascan-share.json"); sp.add_argument("--run", type=int, default=None)
+    sp.add_argument("--cell", default=None, help="lat,lon of the antenna; rounded to --cell-size degrees (omit for no location)")
+    sp.add_argument("--cell-size", type=float, default=DEFAULT_CELL_DEG); sp.add_argument("--rssi-offset", type=float, default=None)
+    sp.add_argument("--token-path", default=os.path.expanduser("~/.config/lorascan/token")); sp.add_argument("--dry-run", action="store_true")
+    sp.set_defaults(fn=cmd_share)
     return p
 
 
