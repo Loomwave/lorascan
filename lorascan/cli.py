@@ -111,7 +111,8 @@ def _run_scan(a, kind: str) -> int:
             try:
                 if engine == "scan":
                     try:
-                        row = scan_energy(radio, step.freq_hz, step.bw_khz, nb_scan=a.nb_scan, offset_dbm=prof.scan_offset_dbm,
+                        nb = a.nb_scan if a.nb_scan else max(256, min(65535, int(step.dwell_s / 8.2e-6)))
+                        row = scan_energy(radio, step.freq_hz, step.bw_khz, nb_scan=nb, offset_dbm=prof.scan_offset_dbm,
                                           busy_t_db=a.busy_t, ts=ts, clock=clock)
                     except ScanError as e:
                         scan_failures += 1
@@ -200,7 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--bw", type=int, default=125, help="measurement bandwidth kHz (62/125/250/500)")
         sp.add_argument("--busy-t", type=float, default=8.0, help="busy threshold dB above floor")
         sp.add_argument("--engine", choices=("poll", "scan"), default="poll", help="poll = host-polled GetRssiInst; scan = on-chip histogram (Semtech scan patch, experimental)")
-        sp.add_argument("--nb-scan", type=int, default=2048, help="samples per on-chip scan (engine=scan)")
+        sp.add_argument("--nb-scan", type=int, default=None, help="samples per on-chip scan (engine=scan); default = dwell / 8.2 us, max 65535")
         sp.add_argument("--duration", default=None, help="stop after e.g. 15m, 2h, 3d")
         sp.add_argument("--fake-clock", action="store_true", help=argparse.SUPPRESS)
         sp.add_argument("-v", "--verbose", action="store_true")

@@ -94,6 +94,10 @@ def spectral_scan(radio, nb_scan: int = 2048, interval: int = SCAN_INTERVAL_8_20
     radio.write_reg(REG_RSSI_AVG_WINDOW, bytes([window]))
     radio.cmd(bytes([OP_SET_RX, 0xFF, 0xFF, 0xFF]))
     radio.cmd(bytes([CMD_SET_SPECTR_SCAN_PARAMS, (nb_scan >> 8) & 0xFF, nb_scan & 0xFF, interval]))
+    # the status register keeps the previous scan's COMPLETED until the new scan is running: wait the
+    # nominal scan time (nb_scan x ~8.2 us) before the first status read, else a stale 0xFF is read and
+    # a partial histogram comes back (seen on the bench 2026-09-14)
+    radio.hal.sleep(max(0.002, nb_scan * 8.2e-6 * 1.05))
     t0 = clock()
     while True:
         st = radio.read_reg(REG_SPECTRAL_SCAN_STATUS, 1)[0]
@@ -106,7 +110,10 @@ def spectral_scan(radio, nb_scan: int = 2048, interval: int = SCAN_INTERVAL_8_20
             raise ScanTimeout(f"spectral scan status 0x{st:02X} after {timeout_s} s")
         radio.hal.sleep(0.002)
     raw = radio.read_reg(REG_SPECTRAL_SCAN_RESULT, 2 * NUM_LEVELS)
-    return [(raw[2 * i] << 8) | raw[2 * i + 1] for i in range(NUM_LEVELS)]
+    hist = [(raw[2 * i] << 8) | raw[2 * i + 1] for i in range(NUM_LEVELS)]
+    if sum(hist) != nb_scan:
+        raise ScanError(f"incomplete histogram: {sum(hist)} of {nb_scan} samples")
+    return hist
 
 
 def hist_stats(hist: list[int], offset_dbm: int = -11, busy_t_db: float = BUSY_T_DB) -> dict:

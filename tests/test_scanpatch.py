@@ -31,8 +31,11 @@ def test_spectral_scan_reads_33_counts():
         if tx[1:3] == bytes([0x04, 0x01]): return bytes(4) + res
         return bytes(len(tx))
     hal, r = mk({0x1D: rr})
+    counts[5] = 2048 - sum(c for i, c in enumerate(counts) if i != 5)   # a complete 2048-sample histogram
+    res2 = b"".join(c.to_bytes(2, "big") for c in counts)
+    hal.replies[0x1D] = lambda tx: (bytes(4) + bytes([next(status)])) if tx[1:3] == bytes([0x07, 0xCD]) else (bytes(4) + res2 if tx[1:3] == bytes([0x04, 0x01]) else bytes(len(tx)))
     h = spectral_scan(r, nb_scan=2048, interval=11, window=0x14, timeout_s=1.0)
-    assert h == counts
+    assert h == counts and hal.clock >= 2048 * 8.2e-6           # waited the nominal scan time before polling
     ops = [t[0] for t in hal.log]
     assert hal.log[0][1:4] == bytes([0x08, 0x9B, 0x00])                        # abort/clear first
     assert hal.log[1][1:4] == bytes([0x08, 0x9B, 0x14])                        # RSSI averaging window
@@ -53,7 +56,7 @@ def test_hist_stats_from_levels():
 
 def test_scan_energy_row():
     counts = [0] * 33; counts[24] = 2000
-    res = b"".join(c.to_bytes(2, "big") for c in counts)
+    res = b"".join(c.to_bytes(2, "big") for c in counts)   # complete: 2000 of nb_scan=2000
     hal, r = mk({0x1D: lambda tx: (bytes(4) + bytes([0xFF])) if tx[1:3] == bytes([0x07, 0xCD]) else (bytes(4) + res if tx[1:3] == bytes([0x04, 0x01]) else bytes(len(tx)))})
     row = scan_energy(r, 911_500_000, 125, nb_scan=2000, offset_dbm=-11)
     assert row.engine == "scan" and row.n == 2000 and row.hist == counts and row.floor_dbm == -107.0 and row.freq_hz == 911_500_000
@@ -71,3 +74,12 @@ def test_setup_scan_mode_is_semtechs_gfsk_recipe():
 
 def test_gfsk_bw_code_picks_nearest_at_or_above():
     assert gfsk_bw_code(125.0) == 0x1A and gfsk_bw_code(234.3) == 0x0A and gfsk_bw_code(62.5) == 0x1B and gfsk_bw_code(500) == 0x09
+
+
+def test_incomplete_histogram_is_an_error():
+    from lorascan.radio.scanpatch import ScanError
+    counts = [0] * 33; counts[24] = 100
+    res = b"".join(c.to_bytes(2, "big") for c in counts)
+    hal, r = mk({0x1D: lambda tx: (bytes(4) + bytes([0xFF])) if tx[1:3] == bytes([0x07, 0xCD]) else (bytes(4) + res if tx[1:3] == bytes([0x04, 0x01]) else bytes(len(tx)))})
+    with pytest.raises(ScanError):
+        spectral_scan(r, 2000)
