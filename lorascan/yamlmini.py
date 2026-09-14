@@ -111,7 +111,8 @@ def parse_yaml(text: str) -> dict:
     def _value(ind: int, key: str, v: str) -> Any:
         if not v:
             if pos[0] < len(lines) and lines[pos[0]][0] > ind:
-                return mapping(lines[pos[0]][0])
+                nxt_ind, nxt = lines[pos[0]]
+                return seq(nxt_ind) if nxt.startswith("- ") else mapping(nxt_ind)     # indented sequence or nested mapping
             if pos[0] < len(lines) and lines[pos[0]][0] == ind and lines[pos[0]][1].startswith("- "):
                 return seq(ind)
             return None

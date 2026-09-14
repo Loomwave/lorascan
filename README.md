@@ -12,7 +12,7 @@ phase 1 (P1): energy layer, quick and survey scans, SQLite store, HTML report, s
 
 ```
 sudo apt install python3-spidev python3-libgpiod
-pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.11/lorascan-0.1.11-py3-none-any.whl
+pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.12/lorascan-0.1.12-py3-none-any.whl
 # or from a checkout of https://github.com/Loomwave/lorascan :  pip install .   (developer: pip install -e .)
 ```
 Issues and results: https://github.com/Loomwave/lorascan/issues
@@ -25,7 +25,7 @@ parts, runtime deps `python3-spidev` + `python3-libgpiod` (Recommends), `python3
 script is `lorascan = lorascan.cli:main`; profiles live inside the package (`lorascan/profiles/*.yaml`) and are
 overridable from `/etc/lorascan/profiles/` and `~/.config/lorascan/profiles/`. `pipx install <wheel>` is the
 clean per-user install on a Pi whose system Python is externally managed (PEP 668): `sudo apt install pipx`,
-then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.11/lorascan-0.1.11-py3-none-any.whl`
+then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.12/lorascan-0.1.12-py3-none-any.whl`
 (`--system-site-packages` so the apt-installed spidev/gpiod modules are visible).
 
 ## Wire and describe your radio
@@ -55,7 +55,7 @@ sudo lorascan auto --from openhop --to https://share.lorascan.app -- survey --db
 ```
 `auto` reads the radio the daemon already uses — meshtasticd's `config.yaml` + the active board in `config.d/`
 (spidev → IRQ/Busy/Reset pins, DIO2/DIO3; `ch341` → the known-good MeshToad pin block + VID/PID) or openHOP's
-`ch341:` block — writes it as a profile under `~/.config/lorascan/profiles/`, stops **only that unit** (resolved from
+`ch341:` block, or `radio_type: sx1262` + `sx1262:` for SPI radios — writes it as a profile under `~/.config/lorascan/profiles/`, stops **only that unit** (resolved from
 `--config` via its ExecStart on multi-instance hosts), verifies nothing else holds the device (`fuser`) and aborts
 loudly if something does, runs the plan after `--`, then starts the unit again in a `finally` and reports whether it
 came back. `--dry-run` prints all of that and touches nothing. With `--to`, the share is uploaded afterwards with the
