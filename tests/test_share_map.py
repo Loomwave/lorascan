@@ -64,3 +64,18 @@ def test_root_page_with_no_data(tmp_path):
     st, ct, html = _get(f"http://127.0.0.1:{srv.server_port}", "/")
     srv.shutdown()
     assert st == 200 and "no uploads yet" in html
+
+
+def test_tile_source_is_configurable_with_osm_default(tmp_path, monkeypatch):
+    from lorascan.share_page import render_map_page, map_data
+    from lorascan.share_server import ShareDB, tiles_config
+    db = ShareDB(str(tmp_path / "t.sqlite"))
+    m = map_data(db); m["cells"] = [{"lat": 34.1, "lon": -84.4, "size_deg": 0.1, "submitters": 1, "hours": 1.0, "busy_mean": 0.1, "quietest": [], "busiest": []}]; m["band"] = [{"freq_hz": 902_000_000, "mhz": 902.0, "label": "", "floor_med": -110, "p90_med": -100, "peak_max": -80, "busy_mean": 0.1, "n_submitters": 1, "hours": 1}]
+    html = render_map_page(m)                                               # default
+    assert "tile.openstreetmap.org" in html and "OpenStreetMap contributors" in html
+    carto = {"url": "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?api_key=KEY", "attribution": "&copy; CARTO, &copy; OpenStreetMap contributors"}
+    html = render_map_page(m, tiles=carto)
+    assert "cartocdn.com" in html and "api_key=KEY" in html and "CARTO" in html and "tile.openstreetmap.org" not in html
+    monkeypatch.setenv("LORASCAN_TILES_URL", "https://example.test/{z}/{x}/{y}.png"); monkeypatch.setenv("LORASCAN_TILES_ATTRIBUTION", "test attr")
+    assert tiles_config(None, None) == {"url": "https://example.test/{z}/{x}/{y}.png", "attribution": "test attr"}
+    assert tiles_config("https://flag.test/{z}/{x}/{y}.png", "flag attr")["url"] == "https://flag.test/{z}/{x}/{y}.png"   # flags beat env
