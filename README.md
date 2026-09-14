@@ -12,7 +12,7 @@ phase 1 (P1): energy layer, quick and survey scans, SQLite store, HTML report, s
 
 ```
 sudo apt install python3-spidev python3-libgpiod
-pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.2/lorascan-0.1.2-py3-none-any.whl
+pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.3/lorascan-0.1.3-py3-none-any.whl
 # or from a checkout of https://github.com/Loomwave/lorascan :  pip install .   (developer: pip install -e .)
 ```
 Issues and results: https://github.com/Loomwave/lorascan/issues
@@ -25,7 +25,7 @@ parts, runtime deps `python3-spidev` + `python3-libgpiod` (Recommends), `python3
 script is `lorascan = lorascan.cli:main`; profiles live inside the package (`lorascan/profiles/*.yaml`) and are
 overridable from `/etc/lorascan/profiles/` and `~/.config/lorascan/profiles/`. `pipx install <wheel>` is the
 clean per-user install on a Pi whose system Python is externally managed (PEP 668): `sudo apt install pipx`,
-then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.2/lorascan-0.1.2-py3-none-any.whl`
+then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.3/lorascan-0.1.3-py3-none-any.whl`
 (`--system-site-packages` so the apt-installed spidev/gpiod modules are visible).
 
 ## Wire and describe your radio
@@ -91,6 +91,15 @@ before the radio is opened; a broker that drops mid-run is counted (`mqtt_errors
 200-CAD reference sweep on the quietest channel so the report can state the false-alarm rate. Only one
 lorascan may hold a radio at a time (a lock on the SPI device); a second one exits with a message.
 
+## Export
+
+```
+lorascan export --db survey.db --csv survey.csv            # survey.csv (energy), survey-cad.csv, survey-decode.csv
+lorascan export --db survey.db --csv cad.csv --table cad   # exactly one table to the named file
+```
+CAD rows carry `hit_rate` (hits / n_cad); decode rows are counts and medians only, never payloads.
+(0.1.0–0.1.2 exported only the energy table: Loomwave/lorascan#1.)
+
 ## Calibration
 
 `lorascan calibrate --profile my-board.yaml --level -60 --freq 915.0` reads a known input level (a signal
@@ -145,6 +154,10 @@ decode against the known-network presets. The report's "LoRa presence by spreadi
   SF9 and SF11 on the busy channels (e.g. 910.525 SF11/BW250 11 of 50, 906.875 SF9/BW125 8 of 50,
   SF7 0 of 50 everywhere), one CRC-valid MeshCore us-narrow frame decoded on 910.525 (−33 dBm,
   SNR 12), seven Loomwave fleet frames on 911.5 (SNR 11).
+
+- 2026-09-14, reported by @wehooper4 (issue #1): v0.1.0 on Debian 13 (Trixie), Python 3.13, a MeshToad CH341
+  USB-SPI stick with profile `meshtoad-v3-ch341` — `probe`, `selftest` and `scan` all GOOD, and a `watch` plan
+  produced 14 energy / 42 CAD / 15 decode rows. First real-hardware validation of the CH341 HAL.
 
 ## Licence
 

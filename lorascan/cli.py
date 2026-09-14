@@ -318,13 +318,34 @@ def cmd_report(a) -> int:
 
 
 def cmd_export(a) -> int:
+    """CSV export of every table (Loomwave/lorascan#1: v0.1.0-0.1.2 wrote only energy).
+
+    --csv X.csv writes energy to X.csv, CAD to X-cad.csv and decodes to X-decode.csv (side files
+    only when the table has rows); --table picks one table and writes it to --csv exactly."""
     store = Store(a.db)
-    with open(a.csv, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["ts", "freq_hz", "bw_hz", "engine", "n", "floor_dbm", "p50", "p90", "peak", "busy_frac", "discarded", "hist"])
-        for r in store.iter_energy(a.run):
-            w.writerow([r.ts, r.freq_hz, r.bw_hz, r.engine, r.n, r.floor_dbm, r.p50, r.p90, r.peak, r.busy_frac, r.discarded, " ".join(map(str, r.hist))])
-    print(f"[export] wrote {a.csv}")
+    stem, ext = os.path.splitext(a.csv)
+    ext = ext or ".csv"
+    tables = {
+        "energy": (["ts", "freq_hz", "bw_hz", "engine", "n", "floor_dbm", "p50", "p90", "peak", "busy_frac", "discarded", "hist"],
+                   lambda: ([r.ts, r.freq_hz, r.bw_hz, r.engine, r.n, r.floor_dbm, r.p50, r.p90, r.peak, r.busy_frac, r.discarded, " ".join(map(str, r.hist))] for r in store.iter_energy(a.run))),
+        "cad": (["ts", "freq_hz", "bw_hz", "sf", "symbols", "n_cad", "hits", "hit_rate", "longest_run", "det_peak", "det_min", "timeouts"],
+                lambda: ([r.ts, r.freq_hz, r.bw_hz, r.sf, r.symbols, r.n_cad, r.hits, round(r.hits / r.n_cad, 4) if r.n_cad else "", r.longest_run, r.det_peak, r.det_min, r.timeouts] for r in store.iter_cad(a.run))),
+        "decode": (["ts", "freq_hz", "network", "preset", "dwell_s", "n_ok", "n_crc_err", "rssi_med", "snr_med", "len_med"],
+                   lambda: ([r.ts, r.freq_hz, r.network, r.preset, r.dwell_s, r.n_ok, r.n_crc_err, r.rssi_med, r.snr_med, r.len_med] for r in store.iter_decode(a.run))),
+    }
+    wanted = [a.table] if a.table != "all" else ["energy", "cad", "decode"]
+    for t in wanted:
+        path = a.csv if (t == "energy" or a.table != "all") else f"{stem}-{t}{ext}"
+        header, rows = tables[t]
+        rows = list(rows())
+        if not rows and t != "energy" and a.table == "all":
+            print(f"[export] {t}: no rows, {path} not written")
+            continue
+        with open(path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(header)
+            w.writerows(rows)
+        print(f"[export] wrote {path} ({len(rows)} rows)")
     return 0
 
 
@@ -398,7 +419,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("status", help="runs, row counts and last-row age in a database"); sp.add_argument("--db", default="lorascan.db"); sp.set_defaults(fn=cmd_status)
     sp = sub.add_parser("report"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--out", default="lorascan-report.html"); sp.add_argument("--title", default="lorascan report")
     sp.add_argument("--run", type=int, default=None); sp.add_argument("--since", default=None, help="only the last e.g. 6h / 2d"); sp.add_argument("--bucket", type=int, default=None, help="heat map bucket seconds (default: auto, <= 600 columns)"); sp.add_argument("--rssi-offset", type=float, default=None); sp.set_defaults(fn=cmd_report)
-    sp = sub.add_parser("export"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--csv", required=True); sp.add_argument("--run", type=int, default=None); sp.set_defaults(fn=cmd_export)
+    sp = sub.add_parser("export", help="CSV: energy to --csv, CAD to <stem>-cad.csv, decodes to <stem>-decode.csv (or one table with --table)"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--csv", required=True); sp.add_argument("--run", type=int, default=None)
+    sp.add_argument("--table", choices=("all", "energy", "cad", "decode"), default="all", help="one table to --csv exactly, or all (default)"); sp.set_defaults(fn=cmd_export)
     sp = sub.add_parser("share", help="write the opt-in community share file (aggregates + coarse cell; no upload yet)")
     sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--out", default="lorascan-share.json"); sp.add_argument("--run", type=int, default=None)
     sp.add_argument("--cell", default=None, help="lat,lon of the antenna; rounded to --cell-size degrees (omit for no location)")
