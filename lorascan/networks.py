@@ -17,6 +17,7 @@ class Preset:
     cr: int = 5
     preamble: int = 8
     crc_on: bool = True
+    invert_iq: bool = False     # LoRaWAN downlinks (and any RX of a gateway-side signal) use inverted IQ
     freqs_hz: tuple = ()        # explicit centre frequencies (LoRaWAN, MeshCore, Loomwave)
     slot_bw_hz: int = 0         # Meshtastic: every slot of this width across the band
 
@@ -52,11 +53,19 @@ MESHTASTIC = Network("meshtastic", 0x2B, (
     _mt("MediumSlow", 10, 250, 5), _mt("LongTurbo", 11, 500, 8), _mt("LongFast", 11, 250, 5), _mt("LongModerate", 11, 125, 8),
 ), "US default LongFast slot 20 = 906.875 MHz; 104 slots at 250 kHz")
 
+_LW_UP125 = tuple(902_300_000 + 200_000 * k for k in range(64))
+_LW_UP500 = tuple(903_000_000 + 1_600_000 * k for k in range(8))
+_LW_DOWN = tuple(923_300_000 + 600_000 * k for k in range(8))
 LORAWAN_US915 = Network("lorawan-us915", 0x34, (
-    Preset("uplink-125k", 7, 125, 5, freqs_hz=tuple(902_300_000 + 200_000 * k for k in range(64))),
-    Preset("uplink-500k", 8, 500, 5, freqs_hz=tuple(903_000_000 + 1_600_000 * k for k in range(8))),
-    Preset("downlink-500k", 7, 500, 5, freqs_hz=tuple(923_300_000 + 600_000 * k for k in range(8))),
-), "uplinks are SF7-SF10 at BW125 (DR0-DR3) and SF8 at BW500 (DR4); downlinks SF7-SF12 at BW500")
+    # RP002 US915 uplinks DR0-DR3 = SF10/9/8/7 @125 kHz on the 64-channel raster, DR4 = SF8 @500 kHz (#4)
+    Preset("uplink-dr0", 10, 125, 5, freqs_hz=_LW_UP125), Preset("uplink-dr1", 9, 125, 5, freqs_hz=_LW_UP125),
+    Preset("uplink-dr2", 8, 125, 5, freqs_hz=_LW_UP125), Preset("uplink-dr3", 7, 125, 5, freqs_hz=_LW_UP125),
+    Preset("uplink-dr4", 8, 500, 5, freqs_hz=_LW_UP500),
+    # downlinks DR8-DR13 = SF12..SF7 @500 kHz: inverted IQ, no PHY CRC (counted on RxDone + valid header)
+    Preset("downlink-dr8", 12, 500, 5, crc_on=False, invert_iq=True, freqs_hz=_LW_DOWN), Preset("downlink-dr9", 11, 500, 5, crc_on=False, invert_iq=True, freqs_hz=_LW_DOWN),
+    Preset("downlink-dr10", 10, 500, 5, crc_on=False, invert_iq=True, freqs_hz=_LW_DOWN), Preset("downlink-dr11", 9, 500, 5, crc_on=False, invert_iq=True, freqs_hz=_LW_DOWN),
+    Preset("downlink-dr12", 8, 500, 5, crc_on=False, invert_iq=True, freqs_hz=_LW_DOWN), Preset("downlink-dr13", 7, 500, 5, crc_on=False, invert_iq=True, freqs_hz=_LW_DOWN),
+), "uplinks DR0-DR3 (SF10-SF7 @125) + DR4 (SF8 @500); downlinks DR8-DR13 (SF12-SF7 @500, inverted IQ, no CRC)")
 
 MESHCORE = Network("meshcore", 0x12, (
     Preset("us-narrow", 7, 62, 5, preamble=32, freqs_hz=(910_525_000,)),

@@ -12,7 +12,7 @@ phase 1 (P1): energy layer, quick and survey scans, SQLite store, HTML report, s
 
 ```
 sudo apt install python3-spidev python3-libgpiod
-pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.5/lorascan-0.1.5-py3-none-any.whl
+pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.6/lorascan-0.1.6-py3-none-any.whl
 # or from a checkout of https://github.com/Loomwave/lorascan :  pip install .   (developer: pip install -e .)
 ```
 Issues and results: https://github.com/Loomwave/lorascan/issues
@@ -25,7 +25,7 @@ parts, runtime deps `python3-spidev` + `python3-libgpiod` (Recommends), `python3
 script is `lorascan = lorascan.cli:main`; profiles live inside the package (`lorascan/profiles/*.yaml`) and are
 overridable from `/etc/lorascan/profiles/` and `~/.config/lorascan/profiles/`. `pipx install <wheel>` is the
 clean per-user install on a Pi whose system Python is externally managed (PEP 668): `sudo apt install pipx`,
-then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.5/lorascan-0.1.5-py3-none-any.whl`
+then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.6/lorascan-0.1.6-py3-none-any.whl`
 (`--system-site-packages` so the apt-installed spidev/gpiod modules are visible).
 
 ## Wire and describe your radio
@@ -107,9 +107,22 @@ lorascan may hold a radio at a time (a lock on the SPI device); a second one exi
 ```
 lorascan export --db survey.db --csv survey.csv            # survey.csv (energy), survey-cad.csv, survey-decode.csv
 lorascan export --db survey.db --csv cad.csv --table cad   # exactly one table to the named file
+lorascan export --db survey.db --csv slots.csv --table slots --slot 500000   # the N kHz window view, best first
 ```
 CAD rows carry `hit_rate` (hits / n_cad); decode rows are counts and medians only, never payloads.
 (0.1.0–0.1.2 exported only the energy table: Loomwave/lorascan#1.)
+
+## Slot view, standalone SVGs, rendering from a share file
+
+```
+lorascan report --db survey.db --out r.html --slot 500000       # adds a '500 kHz slots, best first' table (worst case per window)
+lorascan report --db survey.db --out r.html --svg figs/          # also writes figs/heatmap.svg band.svg sfmap.svg when.svg
+lorascan report --from-share site.json --out site.html --svg figs/   # no database needed: render what a site shared
+```
+The slot table scores each window by its busiest channel's busy fraction + its highest CAD hit rate + decoded
+frames / 10 (lower is better), which is the question "which 500 kHz window is least hit by LoRa" in one table.
+`--from-share` renders the heat map at the share's granularity (hour or day), so a central host can draw a
+site's figures from the 3–53 KB/day it uploads instead of its database.
 
 ## Calibration
 
