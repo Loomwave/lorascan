@@ -107,6 +107,8 @@ class SpidevGpiodHal:
         except ImportError as e:
             raise HalError("python3-spidev is not installed (apt install python3-spidev)") from e
         dev = profile.bus_dev
+        from .lock import acquire_device_lock
+        self._lock_fd = acquire_device_lock(dev)
         bus, cs = dev.replace("/dev/spidev", "").split(".")
         self.spi = spidev.SpiDev()
         self.spi.open(int(bus), int(cs))
@@ -151,3 +153,8 @@ class SpidevGpiodHal:
             self.spi.close()
         finally:
             self.gpio.close()
+            try:
+                import os
+                os.close(self._lock_fd)
+            except OSError:
+                pass

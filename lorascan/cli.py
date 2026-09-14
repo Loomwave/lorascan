@@ -10,6 +10,7 @@ import time
 from . import __version__
 from .profile import load_profile, BoardProfile
 from .hal import open_hal, HalError
+from .hal.lock import DeviceBusy
 from .radio.sx126x import Sx126x, SxError, DeviceError
 from .measure.energy import polled_energy, EnergyRow
 from .radio.scanpatch import upload_patch, scan_energy, version_string, ScanError
@@ -226,6 +227,17 @@ def _run_scan(a, kind: str) -> int:
     return 0
 
 
+def cmd_serve(a) -> int:
+    from .serve import make_server
+    srv = make_server(a.db, a.host, a.port, a.refresh)
+    print(f"[serve] http://{a.host}:{a.port}/  (report re-rendered every {a.refresh} s from {a.db}; Ctrl-C to stop)")
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
 def cmd_status(a) -> int:
     store = Store(a.db)
     now = time.time()
@@ -330,6 +342,7 @@ def build_parser() -> argparse.ArgumentParser:
         if kind == "test":
             sp.set_defaults(dwell=30.0)
         sp.set_defaults(fn=lambda a, k=kind: _run_scan(a, k))
+    sp = sub.add_parser("serve", help="live web page of a database (for a running survey)"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--host", default="0.0.0.0"); sp.add_argument("--port", type=int, default=8080); sp.add_argument("--refresh", type=int, default=60); sp.set_defaults(fn=cmd_serve)
     sp = sub.add_parser("status", help="runs, row counts and last-row age in a database"); sp.add_argument("--db", default="lorascan.db"); sp.set_defaults(fn=cmd_status)
     sp = sub.add_parser("report"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--out", default="lorascan-report.html"); sp.add_argument("--title", default="lorascan report")
     sp.add_argument("--run", type=int, default=None); sp.add_argument("--bucket", type=int, default=None, help="heat map bucket seconds (default: auto, <= 600 columns)"); sp.add_argument("--rssi-offset", type=float, default=None); sp.set_defaults(fn=cmd_report)
@@ -347,7 +360,7 @@ def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
     try:
         return int(a.fn(a))
-    except (HalError, DeviceError, SxError, FileNotFoundError) as e:
+    except (HalError, DeviceBusy, DeviceError, SxError, FileNotFoundError) as e:
         print(f"lorascan: {e}", file=sys.stderr)
         return 1
 
