@@ -83,6 +83,7 @@ def setup_scan_mode(radio, bw_khz: float = 125.0) -> None:
     radio.cmd(bytes([OP_SET_MOD_PARAMS, 0x00, 0x14, 0x00, 0x00, gfsk_bw_code(bw_khz), 0x02, 0xE9, 0x0F]))
     radio.cmd(bytes([OP_SET_PKT_PARAMS, 0x00, 0x20, 0x05, 0x20, 0x00, 0x01, 0xFF, 0x01, 0x00]))
     radio._scan_mode_bw = bw_khz
+    radio.mode = "gfsk"
 
 
 def spectral_scan(radio, nb_scan: int = 2048, interval: int = SCAN_INTERVAL_8_20_US, window: int = WINDOW_DEFAULT,
@@ -141,7 +142,7 @@ def hist_stats(hist: list[int], offset_dbm: int = -11, busy_t_db: float = BUSY_T
 
 def scan_energy(radio, freq_hz: int, bw_khz: int, nb_scan: int = 2048, offset_dbm: int = -11,
                 busy_t_db: float = BUSY_T_DB, ts: float | None = None, clock=time.monotonic) -> EnergyRow:
-    if getattr(radio, "_scan_mode_bw", None) != bw_khz:
+    if getattr(radio, "mode", None) != "gfsk" or getattr(radio, "_scan_mode_bw", None) != bw_khz:
         setup_scan_mode(radio, bw_khz)
     radio.set_frequency(freq_hz)
     radio.hal.set_rxen(True)

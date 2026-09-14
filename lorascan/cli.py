@@ -14,7 +14,12 @@ from .measure.energy import polled_energy, EnergyRow
 from .radio.scanpatch import upload_patch, scan_energy, version_string, ScanError
 from .plan.grid import band_grid, KNOWN_CHANNELS, label_for
 from .plan.quick import quick_plan
-from .plan.survey import survey_plan
+from .plan.survey import survey_plan, Step
+from .plan.watch import watch_plan
+from .plan.candidate import candidate_plan, parse_candidates
+from .measure.cad import cad_sweep
+from .measure.decode import decode_dwell
+from .networks import NETWORKS, presets_on
 from .store.db import Store
 from .report.html import render_report
 
@@ -72,23 +77,68 @@ def cmd_selftest(a) -> int:
     return 0 if ok else 2
 
 
+def _cad_steps(freqs, sfs=(7, 9, 11), bws=(125, 250), dwell_s=0.0):
+    for f in freqs:
+        for sf in sfs:
+            for bw in bws:
+                yield Step(f, bw, dwell_s, "cad", sf=sf)
+
+
 def _run_scan(a, kind: str) -> int:
     prof = _profile(a.profile)
     store = Store(a.db)
-    grid = band_grid(a.start, a.stop, a.step)
     if prof.bus_type == "fake":
         a.fake_clock = True          # a simulated radio never sleeps; drive its time from a fake clock
     fake_clock = [0.0]
     clock = (lambda: fake_clock[0]) if a.fake_clock else time.monotonic
     run_id = store.new_run(kind, prof.name, a.note)
+    activity: dict[int, float] = {}
+    cad_sfs = [int(x) for x in a.sfs.split(",")] if getattr(a, "sfs", None) else [7, 9, 11]
+    cad_bws = [int(x) for x in a.bws.split(",")] if getattr(a, "bws", None) else [125, 250]
+    if kind == "quick":
+        grid = band_grid(a.start, a.stop, a.step)
+        base = quick_plan(grid, passes=a.passes, dwell_s=a.dwell, bw_khz=a.bw)
+        if a.cad:
+            def _quick_with_cad():
+                hot = set()
+                for st in base:
+                    yield st
+                    if activity.get(st.freq_hz, 0.0) > 0.05:
+                        hot.add(st.freq_hz)
+                for st in _cad_steps(sorted(hot | {f for f, _ in KNOWN_CHANNELS}), cad_sfs, cad_bws):
+                    yield st
+            steps = _quick_with_cad()
+        else:
+            steps = base
+    elif kind == "survey":
+        grid = band_grid(a.start, a.stop, a.step)
+        base = survey_plan(grid, dwell_s=a.dwell, revisit_max_s=a.revisit, activity=activity, bw_khz=a.bw, clock=clock)
+        if a.cad:
+            def _survey_with_cad():
+                n = 0
+                for st in base:
+                    yield st
+                    n += 1
+                    if n % len(grid) == 0:      # one CAD pass over the currently hot + known channels per grid round
+                        hot = [f for f, v in activity.items() if v > 0.05]
+                        for c in _cad_steps(sorted(set(hot) | {f for f, _ in KNOWN_CHANNELS}), cad_sfs, cad_bws):
+                            yield c
+            steps = _survey_with_cad()
+        else:
+            steps = base
+    elif kind == "watch":
+        freqs = [int(round(float(x) * 1e6)) for x in a.freqs.split(",")]
+        grid = freqs
+        steps = watch_plan(freqs, dwell_s=a.dwell, sfs=cad_sfs, bws=cad_bws, decode_dwell_s=a.decode_dwell, cycles=a.cycles)
+    elif kind == "test":
+        cands = parse_candidates(a.candidates)
+        grid = [c[0] for c in cands]
+        steps = candidate_plan(cands, dwell_s=a.dwell)
+    else:
+        raise SystemExit(f"unknown plan {kind}")
     hal, radio = _open_radio(prof, grid[0])
     if a.fake_clock:
         hal.sleep = lambda s: fake_clock.__setitem__(0, fake_clock[0] + s)  # type: ignore[attr-defined]
-    activity: dict[int, float] = {}
-    if kind == "quick":
-        steps = quick_plan(grid, passes=a.passes, dwell_s=a.dwell, bw_khz=a.bw)
-    else:
-        steps = survey_plan(grid, dwell_s=a.dwell, revisit_max_s=a.revisit, activity=activity, bw_khz=a.bw, clock=clock)
     limit = _duration(a.duration)
     t_start = clock()
     stopped = {"flag": False}
@@ -99,6 +149,7 @@ def _run_scan(a, kind: str) -> int:
     n, failures = 0, 0
     engine = a.engine
     scan_failures = 0
+    nets = {nw.name: nw for nw in NETWORKS}
     if engine == "scan":
         upload_patch(radio)
         print(f"[scan] scan patch uploaded; chip version string {version_string(radio)!r}")
@@ -109,6 +160,22 @@ def _run_scan(a, kind: str) -> int:
                 break
             ts = time.time() if not a.fake_clock else 1_700_000_000.0 + clock()
             try:
+                if step.layer == "cad":
+                    row = cad_sweep(radio, step.freq_hz, step.sf, step.bw_khz, n_cad=a.cad_n, clock=clock, ts=ts, cr=step.cr)
+                    store.add_cad(run_id, row)
+                    n += 1
+                    if a.verbose:
+                        print(f"[cad ] {n:5d} {row.freq_hz/1e6:8.3f} MHz sf{row.sf}/bw{row.bw_hz//1000} hits {row.hits}/{row.n_cad} run {row.longest_run} timeouts {row.timeouts}")
+                    continue
+                if step.layer == "decode":
+                    net = nets[step.network]
+                    preset = [p for p in net.presets if p.name == step.preset][0]
+                    row = decode_dwell(radio, step.freq_hz, net, preset, step.dwell_s, clock=clock, ts=ts)
+                    store.add_decode(run_id, row)
+                    n += 1
+                    if a.verbose:
+                        print(f"[dec ] {n:5d} {row.freq_hz/1e6:8.3f} MHz {row.network}/{row.preset}: ok {row.n_ok} crc-err {row.n_crc_err} rssi {row.rssi_med:.0f} snr {row.snr_med:.1f}")
+                    continue
                 if engine == "scan":
                     try:
                         nb = a.nb_scan if a.nb_scan else max(256, min(65535, int(step.dwell_s / 8.2e-6)))
@@ -123,6 +190,7 @@ def _run_scan(a, kind: str) -> int:
                             radio.init(step.freq_hz)      # back to the LoRa modem the polled engine expects
                         continue
                 else:
+                    radio.ensure_lora(step.freq_hz)
                     row = polled_energy(radio, step.freq_hz, step.bw_khz, step.dwell_s, clock=clock, sample_gap_s=a.sample_gap,
                                         busy_t_db=a.busy_t, offset_dbm=prof.scan_offset_dbm, ts=ts)
             except SxError as e:
@@ -142,7 +210,7 @@ def _run_scan(a, kind: str) -> int:
             activity[step.freq_hz] = 0.7 * activity.get(step.freq_hz, 0.0) + 0.3 * row.busy_frac
             n += 1
             if a.verbose or n % 50 == 0:
-                print(f"[scan] {n:5d} {row.freq_hz/1e6:8.3f} MHz n={row.n:4d} floor={row.floor_dbm:6.1f} p90={row.p90:6.1f} peak={row.peak:6.1f} busy={row.busy_frac*100:5.1f}% {label_for(row.freq_hz)}")
+                print(f"[scan] {n:5d} {row.freq_hz/1e6:8.3f} MHz n={row.n:5d} floor={row.floor_dbm:6.1f} p90={row.p90:6.1f} peak={row.peak:6.1f} busy={row.busy_frac*100:5.1f}% {label_for(row.freq_hz)}")
     finally:
         signal.signal(signal.SIGINT, old); signal.signal(signal.SIGTERM, old_t)
         store.add_event(run_id, "stop", f"rows={n} failures={failures}")
@@ -194,9 +262,20 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("probe", help="first-light SPI check (reset, GetStatus, sync-word read)"); sp.add_argument("--profile", default="generic-spidev"); sp.set_defaults(fn=cmd_probe)
     sp = sub.add_parser("selftest", help="init + two short energy reads"); radio_args(sp); sp.set_defaults(fn=cmd_selftest)
     sc = sub.add_parser("scan", help="run a scan plan"); ssub = sc.add_subparsers(dest="plan", required=True)
-    for kind in ("quick", "survey"):
-        sp = ssub.add_parser(kind); radio_args(sp)
+    plans = {"quick": ssub, "survey": ssub, "watch": ssub, "test": sub}
+    for kind, parent in plans.items():
+        sp = parent.add_parser(kind, help={"quick": "whole band, < 1 h", "survey": "continuous, adaptive revisit", "watch": "fixed channel list, all layers, high time resolution", "test": "candidate frequencies + LoRa settings -> report card"}[kind]); radio_args(sp)
         sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--note", default="")
+        sp.add_argument("--cad", action="store_true", help="quick/survey: add CAD sweeps on hot + known channels")
+        sp.add_argument("--cad-n", type=int, default=50, help="CADs per sweep")
+        sp.add_argument("--sfs", default=None, help="CAD spreading factors, e.g. 7,9,11")
+        sp.add_argument("--bws", default=None, help="CAD/energy bandwidths kHz, e.g. 125,250")
+        if kind == "watch":
+            sp.add_argument("--freqs", required=True, help="MHz list, e.g. 906.875,911.5,921.0")
+            sp.add_argument("--decode-dwell", type=float, default=10.0, help="seconds per decode attempt")
+            sp.add_argument("--cycles", type=int, default=None, help="rounds over the list (default: until --duration/Ctrl-C)")
+        if kind == "test":
+            sp.add_argument("--candidates", required=True, help="MHz/SF/BW[/CR] list, e.g. 905.0/9/125,921.0/11/250/8")
         sp.add_argument("--start", type=int, default=902_000_000); sp.add_argument("--stop", type=int, default=928_000_000); sp.add_argument("--step", type=int, default=200_000)
         sp.add_argument("--bw", type=int, default=125, help="measurement bandwidth kHz (62/125/250/500)")
         sp.add_argument("--busy-t", type=float, default=8.0, help="busy threshold dB above floor")
@@ -207,8 +286,10 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("-v", "--verbose", action="store_true")
         if kind == "quick":
             sp.add_argument("--passes", type=int, default=2)
-        else:
+        if kind == "survey":
             sp.add_argument("--revisit", type=float, default=600.0, help="max seconds between visits of any channel")
+        if kind == "test":
+            sp.set_defaults(dwell=30.0)
         sp.set_defaults(fn=lambda a, k=kind: _run_scan(a, k))
     sp = sub.add_parser("report"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--out", default="lorascan-report.html"); sp.add_argument("--title", default="lorascan report")
     sp.add_argument("--run", type=int, default=None); sp.add_argument("--bucket", type=int, default=60); sp.add_argument("--rssi-offset", type=float, default=None); sp.set_defaults(fn=cmd_report)

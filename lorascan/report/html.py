@@ -6,6 +6,7 @@ import datetime as dt
 import html
 import json
 from ..plan.grid import label_for
+from ..plan.candidate import rank_candidates
 
 PLOTLY_URL = "https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js"
 
@@ -46,7 +47,37 @@ def build_data(store, run_id=None, bucket_s: int = 60, rssi_offset_db: float = 0
         for (wd, h), (s, n) in acc.items():
             when[wd][h] = round(s / n, 4)
     runs = store.runs()
+    # LoRa presence (CAD) per frequency x SF, and decoded networks per frequency
+    cads = store.cad_summary(run_id)
+    sfs = sorted({c["sf"] for c in cads})
+    cad_freqs = sorted({c["freq_hz"] for c in cads})
+    z = [[None] * len(sfs) for _ in cad_freqs]
+    for c in cads:
+        i, j = cad_freqs.index(c["freq_hz"]), sfs.index(c["sf"])
+        z[i][j] = round(max(c["hit_rate"], z[i][j] or 0.0), 4)      # best bandwidth per (freq, sf)
+    decs = store.decode_summary(run_id)
+    dec_by_f: dict[int, list] = {}
+    for d in decs:
+        if d["n_ok"]:
+            dec_by_f.setdefault(d["freq_hz"], []).append(f"{d['network']}/{d['preset']} {d['n_ok']}")
+    for c in chans:
+        c["decoded"] = ", ".join(dec_by_f.get(c["freq_hz"], []))
+        rates = [x["hit_rate"] for x in cads if x["freq_hz"] == c["freq_hz"]]
+        c["cad_hit_rate"] = max(rates) if rates else None
+    # candidate report card for 'test' runs
+    card = []
+    if any(r["kind"] == "test" for r in runs):
+        for c in chans:
+            cad_here = [x for x in cads if x["freq_hz"] == c["freq_hz"]]
+            best = max(cad_here, key=lambda x: x["n_cad"]) if cad_here else None
+            card.append({"freq_hz": c["freq_hz"], "mhz": c["mhz"], "sf": best["sf"] if best else 0, "bw_khz": (best["bw_hz"] if best else c["bw_hz"]) // 1000,
+                         "busy_mean": c["busy_mean"], "cad_hit_rate": best["hit_rate"] if best else 0.0,
+                         "decoded": sum(d["n_ok"] for d in decs if d["freq_hz"] == c["freq_hz"]), "floor_med": c["floor_med"] + rssi_offset_db,
+                         "p90_med": c["p90_med"] + rssi_offset_db, "n_samples": c["n_samples"]})
+        card = rank_candidates(card)
     return {
+        "sfmap": {"freqs_mhz": [f / 1e6 for f in cad_freqs], "sfs": sfs, "z": z},
+        "decodes": decs, "card": card,
         "generated": _iso(dt.datetime.now(dt.timezone.utc).timestamp()),
         "runs": runs, "rssi_offset_db": rssi_offset_db,
         "calibration": "calibrated (offset %+.1f dB applied)" % rssi_offset_db if rssi_offset_db else "relative (uncalibrated)",
@@ -77,8 +108,10 @@ table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;fon
 <h2>Band summary</h2><div class="note">bar = floor (P10) to peak per channel; label = busy %.</div>
 <div id="band" class="fig"></div>
 <div id="when-wrap" hidden><h2>When is it busy</h2><div class="note">mean busy fraction across all channels by hour of day (UTC) and weekday; needs a run longer than an hour.</div><div id="when" class="fig"></div></div>
+<div id="sf-wrap" hidden><h2>LoRa presence by spreading factor</h2><div class="note">Channel Activity Detection hit rate per (frequency, SF): the LoRa-specific detector, blind across SFs by design.</div><div id="sfmap" class="fig"></div></div>
+{card_html}
 <h2>Quietest channels</h2>
-<table><thead><tr><th>MHz</th><th>who lives here</th><th>busy %</th><th>floor dBm</th><th>P90 dBm</th><th>peak dBm</th><th>rows</th></tr></thead><tbody>{quiet_rows}</tbody></table>
+<table><thead><tr><th>MHz</th><th>who lives here</th><th>busy %</th><th>floor dBm</th><th>P90 dBm</th><th>peak dBm</th><th>rows</th><th>decoded</th></tr></thead><tbody>{quiet_rows}</tbody></table>
 <div class="note">Levels are {calibration}. Busy threshold and floor definition: floor = P10 of the dwell's samples, busy = samples above floor + 8 dB (lorascan defaults).</div>
 <script id="lorascan-data" type="application/json">{data_json}</script>
 <script src="{plotly}"></script>
@@ -91,6 +124,7 @@ const heatP90={{type:'heatmap',x:D.heat.buckets,y:D.heat.freqs_mhz,z:D.heat.p90,
 Plotly.newPlot('heat',[heatBusy,heatP90],Object.assign(lay(''),{{yaxis:{{title:'MHz'}},xaxis:{{title:'time (UTC)'}},updatemenus:[{{type:'buttons',x:0,y:1.15,buttons:[{{label:'busy fraction',method:'update',args:[{{visible:[true,false]}}]}},{{label:'P90 level',method:'update',args:[{{visible:[false,true]}}]}}]}}]}}),{{responsive:true}});
 const C=D.channels;
 Plotly.newPlot('band',[{{type:'bar',x:C.map(c=>c.mhz),y:C.map(c=>c.peak_max-c.floor_med),base:C.map(c=>c.floor_med),marker:{{color:C.map(c=>c.busy_mean),colorscale:'YlOrRd',cmin:0,cmax:1}},text:C.map(c=>(c.busy_mean*100).toFixed(1)+'%'+(c.label?' · '+c.label:'')),textposition:'outside',hovertemplate:'%{{x}} MHz<br>floor %{{base}} dBm → peak %{{y}}<extra></extra>',width:0.15}}],Object.assign(lay(''),{{yaxis:{{title:'dBm'}},xaxis:{{title:'MHz'}}}}),{{responsive:true}});
+if(D.sfmap.sfs.length){{document.getElementById('sf-wrap').hidden=false;Plotly.newPlot('sfmap',[{{type:'heatmap',x:D.sfmap.sfs.map(s=>'SF'+s),y:D.sfmap.freqs_mhz,z:D.sfmap.z,colorscale:'YlOrRd',zmin:0,zmax:1,colorbar:{{title:'CAD hit rate'}}}}],Object.assign(lay(''),{{yaxis:{{title:'MHz'}}}}),{{responsive:true}});}}
 if(D.span_s>3600){{document.getElementById('when-wrap').hidden=false;Plotly.newPlot('when',[{{type:'heatmap',x:[...Array(24).keys()],y:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],z:D.when,colorscale:'YlOrRd',zmin:0,zmax:1,colorbar:{{title:'busy'}}}}],Object.assign(lay(''),{{xaxis:{{title:'hour (UTC)'}}}}),{{responsive:true}});}}
 </script></main></body></html>
 """
@@ -98,12 +132,18 @@ if(D.span_s>3600){{document.getElementById('when-wrap').hidden=false;Plotly.newP
 
 def render_report(store, out_path: str, title: str = "lorascan report", run_id=None, bucket_s: int = 60, rssi_offset_db: float = 0.0) -> str:
     d = build_data(store, run_id, bucket_s, rssi_offset_db)
+    dec_of = {c["freq_hz"]: c.get("decoded", "") for c in d["channels"]}
     rows = "".join(
-        f"<tr><td>{c['mhz']:.3f}</td><td>{html.escape(c['label'])}</td><td>{c['busy_mean']*100:.1f}</td><td>{c['floor_med']:.0f}</td><td>{c['p90_med']:.0f}</td><td>{c['peak_max']:.0f}</td><td>{c['n_rows']}</td></tr>"
+        f"<tr><td>{c['mhz']:.3f}</td><td>{html.escape(c['label'])}</td><td>{c['busy_mean']*100:.1f}</td><td>{c['floor_med']:.0f}</td><td>{c['p90_med']:.0f}</td><td>{c['peak_max']:.0f}</td><td>{c['n_rows']}</td><td>{html.escape(dec_of.get(c['freq_hz'], ''))}</td></tr>"
         for c in d["quietest"])
+    card_html = ""
+    if d["card"]:
+        card_rows = "".join(f"<tr><td>{c['rank']}</td><td>{c['mhz']:.3f} SF{c['sf']} BW{c['bw_khz']}</td><td>{c['score']:.3f}</td><td>{c['busy_mean']*100:.1f}</td><td>{c['cad_hit_rate']*100:.1f}</td><td>{c['decoded']}</td><td>{c['floor_med']:.0f}</td><td>{c['p90_med']:.0f}</td><td>{c['n_samples']}</td></tr>" for c in d["card"])
+        card_html = ("<h2>Candidate report card</h2><div class=\"note\">score = busy fraction + CAD hit rate + decoded frames / 10 (lower is better); every number is from a passive dwell at exactly the candidate settings.</div>"
+                     "<table><thead><tr><th>rank</th><th>candidate</th><th>score</th><th>busy %</th><th>CAD hit %</th><th>decoded</th><th>floor dBm</th><th>P90 dBm</th><th>samples</th></tr></thead><tbody>" + card_rows + "</tbody></table>")
     runs = ", ".join(f"#{r['id']} {r['kind']} ({r['profile']}) {_iso(r['first_ts']) if r['first_ts'] else '-'} → {_iso(r['last_ts']) if r['last_ts'] else '-'}" for r in d["runs"]) or "none"
     page = _PAGE.format(title=html.escape(title), generated=d["generated"], runs=html.escape(runs), calibration=d["calibration"],
-                        bucket_s=bucket_s, quiet_rows=rows, data_json=json.dumps(d).replace("</", "<\\/"), plotly=PLOTLY_URL)
+                        bucket_s=bucket_s, quiet_rows=rows, card_html=card_html, data_json=json.dumps(d).replace("</", "<\\/"), plotly=PLOTLY_URL)
     with open(out_path, "w") as f:
         f.write(page)
     return page
