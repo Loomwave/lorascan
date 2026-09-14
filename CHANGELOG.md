@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 — 2026-09-14
+- `--mqtt mqtt://[user:pass@]host[:port][/prefix]` on every scan plan: publishes each energy / CAD / decode row as it is measured plus a retained status topic, for Grafana and Home Assistant users (optional `paho-mqtt`; a broker that drops mid-run never stops the scan).
+- README: offline charts note, MQTT topics, Debian packaging notes (pipx on PEP 668 systems).
+
 ## 0.1.1 — 2026-09-14
 - Reports and the `serve` live page now carry **static SVG charts** (occupancy heat map, band summary, SF map, hour×weekday matrix) rendered by Python with no JavaScript and no network. They are the charts you see on an offline Pi, in a mail client, or when the plotly CDN is blocked; the interactive plotly.js figures are layered on top when the CDN loads, and the page says in one line which of the two it is showing. Fixes "the charts on the status page appear empty" (the page only had plotly figures, which need cdnjs.cloudflare.com at view time).
 
