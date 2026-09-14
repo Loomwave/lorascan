@@ -8,6 +8,8 @@ import json
 from ..plan.grid import label_for
 from ..plan.candidate import rank_candidates
 
+from .svg import heatmap_svg, band_svg, sfmap_svg, when_svg  # noqa: E402
+
 PLOTLY_URL = "https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js"
 
 
@@ -122,35 +124,41 @@ _PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport
 body{{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif;padding:1.5rem 1rem 4rem}}
 main{{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:1.2rem}}
 h1{{margin:0;font-size:1.5rem}} h2{{margin:1rem 0 .3rem;font-size:1.1rem}} .meta{{color:var(--muted);font-size:.9rem;display:flex;gap:1.2rem;flex-wrap:wrap}}
-.fig{{background:var(--paper);border:1px solid var(--line);padding:.5rem;min-height:320px}}
+.fig{{background:var(--paper);border:1px solid var(--line);padding:.5rem}} .static-wrap svg{{display:block;color:var(--ink)}} .plot{{min-height:320px}} #plotly-note{{color:var(--muted);font-size:.8rem}}
 table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:.9rem}} th,td{{padding:.3rem .6rem;border-bottom:1px solid var(--line);text-align:right}} th:nth-child(2),td:nth-child(2){{text-align:left}}
 .note{{color:var(--muted);font-size:.85rem}}
 </style></head><body><main>
 <h1>{title}</h1>
 <div class="meta"><span>generated {generated}</span><span>runs: {runs}</span><span>levels: <b>{calibration}</b></span><span>bucket {bucket_s}s</span></div>
 <h2>Occupancy heat map</h2><div class="note">colour = fraction of RSSI samples more than the busy threshold above the channel floor (busy fraction); toggle to P90 level with the buttons.</div>
-<div id="heat" class="fig"></div>
+<div class="fig"><div class="static-wrap" id="heat-static">{heat_svg}</div><div id="heat" class="plot" hidden></div></div>
 <h2>Band summary</h2><div class="note">bar = floor (P10) to peak per channel; label = busy %.</div>
-<div id="band" class="fig"></div>
-<div id="when-wrap" hidden><h2>When is it busy</h2><div class="note">mean busy fraction across all channels by hour of day (UTC) and weekday; needs a run longer than an hour.</div><div id="when" class="fig"></div></div>
-<div id="sf-wrap" hidden><h2>LoRa presence by spreading factor</h2><div class="note">Channel Activity Detection hit rate per (frequency, SF): the LoRa-specific detector, blind across SFs by design. {fa_note}</div><div id="sfmap" class="fig"></div></div>
+<div class="fig"><div class="static-wrap" id="band-static">{band_svg}</div><div id="band" class="plot" hidden></div></div>
+<div id="when-wrap" {when_hidden}><h2>When is it busy</h2><div class="note">mean busy fraction across all channels by hour of day (UTC) and weekday; needs a run longer than an hour.</div><div class="fig"><div class="static-wrap" id="when-static">{when_svg}</div><div id="when" class="plot" hidden></div></div></div>
+<div id="sf-wrap" {sf_hidden}><h2>LoRa presence by spreading factor</h2><div class="note">Channel Activity Detection hit rate per (frequency, SF): the LoRa-specific detector, blind across SFs by design. {fa_note}</div><div class="fig"><div class="static-wrap" id="sfmap-static">{sf_svg}</div><div id="sfmap" class="plot" hidden></div></div></div>
 {card_html}
 <h2>Quietest channels</h2>
 <table><thead><tr><th>MHz</th><th>who lives here</th><th>busy %</th><th>floor dBm</th><th>P90 dBm</th><th>peak dBm</th><th>rows</th><th>decoded</th></tr></thead><tbody>{quiet_rows}</tbody></table>
 <div class="note">Levels are {calibration}. Busy threshold and floor definition: floor = P10 of the dwell's samples, busy = samples above floor + 8 dB (lorascan defaults).</div>
 <script id="lorascan-data" type="application/json">{data_json}</script>
+<div id="plotly-note">interactive charts: loading plotly.js from cdnjs… (the static charts above work offline)</div>
 <script src="{plotly}"></script>
 <script>
+const NOTE=document.getElementById('plotly-note');
+if(typeof Plotly==='undefined'){{NOTE.textContent='interactive charts unavailable: plotly.js did not load from '+{plotly_json}+' (offline or blocked CDN). The static charts above are complete.';}}else{{try{{
 const D=JSON.parse(document.getElementById('lorascan-data').textContent);
 const dark=matchMedia('(prefers-color-scheme: dark)').matches;
 const lay=(t)=>({{margin:{{l:70,r:20,t:30,b:60}},paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'rgba(0,0,0,0)',font:{{color:dark?'#E4EAF0':'#1B2430'}},title:t}});
 const heatBusy={{type:'heatmap',x:D.heat.buckets,y:D.heat.freqs_mhz,z:D.heat.busy,colorscale:'YlOrRd',zmin:0,zmax:1,colorbar:{{title:'busy'}},hovertemplate:'%{{y}} MHz<br>%{{x}}<br>busy %{{z}}<extra></extra>'}};
 const heatP90={{type:'heatmap',x:D.heat.buckets,y:D.heat.freqs_mhz,z:D.heat.p90,colorscale:'Viridis',colorbar:{{title:'P90 dBm'}},visible:false,hovertemplate:'%{{y}} MHz<br>%{{x}}<br>P90 %{{z}} dBm<extra></extra>'}};
-Plotly.newPlot('heat',[heatBusy,heatP90],Object.assign(lay(''),{{yaxis:{{title:'MHz'}},xaxis:{{title:'time (UTC)'}},updatemenus:[{{type:'buttons',x:0,y:1.15,buttons:[{{label:'busy fraction',method:'update',args:[{{visible:[true,false]}}]}},{{label:'P90 level',method:'update',args:[{{visible:[false,true]}}]}}]}}]}}),{{responsive:true}});
+document.getElementById('heat').hidden=false;Plotly.newPlot('heat',[heatBusy,heatP90],Object.assign(lay(''),{{yaxis:{{title:'MHz'}},xaxis:{{title:'time (UTC)'}},updatemenus:[{{type:'buttons',x:0,y:1.15,buttons:[{{label:'busy fraction',method:'update',args:[{{visible:[true,false]}}]}},{{label:'P90 level',method:'update',args:[{{visible:[false,true]}}]}}]}}]}}),{{responsive:true}});
 const C=D.channels;
-Plotly.newPlot('band',[{{type:'bar',x:C.map(c=>c.mhz),y:C.map(c=>c.peak_max-c.floor_med),base:C.map(c=>c.floor_med),marker:{{color:C.map(c=>c.busy_mean),colorscale:'YlOrRd',cmin:0,cmax:1}},text:C.map(c=>(c.busy_mean*100).toFixed(1)+'%'+(c.label?' · '+c.label:'')),textposition:'outside',hovertemplate:'%{{x}} MHz<br>floor %{{base}} dBm → peak %{{y}}<extra></extra>',width:0.15}}],Object.assign(lay(''),{{yaxis:{{title:'dBm'}},xaxis:{{title:'MHz'}}}}),{{responsive:true}});
-if(D.sfmap.sfs.length){{document.getElementById('sf-wrap').hidden=false;Plotly.newPlot('sfmap',[{{type:'heatmap',x:D.sfmap.sfs.map(s=>'SF'+s),y:D.sfmap.freqs_mhz,z:D.sfmap.z,colorscale:'YlOrRd',zmin:0,zmax:1,colorbar:{{title:'CAD hit rate'}}}}],Object.assign(lay(''),{{yaxis:{{title:'MHz'}}}}),{{responsive:true}});}}
-if(D.span_s>3600){{document.getElementById('when-wrap').hidden=false;Plotly.newPlot('when',[{{type:'heatmap',x:[...Array(24).keys()],y:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],z:D.when,colorscale:'YlOrRd',zmin:0,zmax:1,colorbar:{{title:'busy'}}}}],Object.assign(lay(''),{{xaxis:{{title:'hour (UTC)'}}}}),{{responsive:true}});}}
+document.getElementById('band').hidden=false;Plotly.newPlot('band',[{{type:'bar',x:C.map(c=>c.mhz),y:C.map(c=>c.peak_max-c.floor_med),base:C.map(c=>c.floor_med),marker:{{color:C.map(c=>c.busy_mean),colorscale:'YlOrRd',cmin:0,cmax:1}},text:C.map(c=>(c.busy_mean*100).toFixed(1)+'%'+(c.label?' · '+c.label:'')),textposition:'outside',hovertemplate:'%{{x}} MHz<br>floor %{{base}} dBm → peak %{{y}}<extra></extra>',width:0.15}}],Object.assign(lay(''),{{yaxis:{{title:'dBm'}},xaxis:{{title:'MHz'}}}}),{{responsive:true}});
+if(D.sfmap.sfs.length){{document.getElementById('sf-wrap').hidden=false;document.getElementById('sfmap').hidden=false;Plotly.newPlot('sfmap',[{{type:'heatmap',x:D.sfmap.sfs.map(s=>'SF'+s),y:D.sfmap.freqs_mhz,z:D.sfmap.z,colorscale:'YlOrRd',zmin:0,zmax:1,colorbar:{{title:'CAD hit rate'}}}}],Object.assign(lay(''),{{yaxis:{{title:'MHz'}}}}),{{responsive:true}});}}
+if(D.span_s>3600){{document.getElementById('when-wrap').hidden=false;document.getElementById('when').hidden=false;Plotly.newPlot('when',[{{type:'heatmap',x:[...Array(24).keys()],y:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],z:D.when,colorscale:'YlOrRd',zmin:0,zmax:1,colorbar:{{title:'busy'}}}}],Object.assign(lay(''),{{xaxis:{{title:'hour (UTC)'}}}}),{{responsive:true}});}}
+for(const id of ['heat','band','when','sfmap']){{const s=document.getElementById(id+'-static');if(s&&!document.getElementById(id).hidden)s.hidden=true;}}
+NOTE.textContent='interactive charts: plotly.js '+Plotly.version+' (hover for values; buttons toggle layers)';
+}}catch(e){{NOTE.textContent='interactive charts failed: '+e+'. The static charts above are complete.';}}}}
 </script></main></body></html>
 """
 
@@ -171,7 +179,9 @@ def render_report(store, out_path: str, title: str = "lorascan report", run_id=N
     fa = d.get("cad_false_alarm")
     fa_note = (f"Reference false-alarm rate {fa['rate']*100:.1f} % from {fa['n_cad']} CADs at SF{fa['sf']} on the quietest channel ({fa['freq_hz']/1e6:.3f} MHz): hit rates near that value are noise, not LoRa." if fa else "")
     page = _PAGE.format(title=html.escape(title), generated=d["generated"], runs=html.escape(runs), calibration=d["calibration"], fa_note=fa_note,
-                        bucket_s=bucket_s, quiet_rows=rows, card_html=card_html, data_json=json.dumps(d).replace("</", "<\\/"), plotly=PLOTLY_URL)
+                        bucket_s=bucket_s, quiet_rows=rows, card_html=card_html, data_json=json.dumps(d).replace("</", "<\\/"), plotly=PLOTLY_URL, plotly_json=json.dumps(PLOTLY_URL),
+                        heat_svg=heatmap_svg(d["heat"], "busy"), band_svg=band_svg(d["channels"]), sf_svg=sfmap_svg(d["sfmap"]), when_svg=when_svg(d["when"]),
+                        when_hidden="" if d["span_s"] > 3600 else "hidden", sf_hidden="" if d["sfmap"]["sfs"] else "hidden")
     with open(out_path, "w") as f:
         f.write(page)
     return page
