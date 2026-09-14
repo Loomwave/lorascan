@@ -12,7 +12,7 @@ phase 1 (P1): energy layer, quick and survey scans, SQLite store, HTML report, s
 
 ```
 sudo apt install python3-spidev python3-libgpiod
-pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.10/lorascan-0.1.10-py3-none-any.whl
+pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.11/lorascan-0.1.11-py3-none-any.whl
 # or from a checkout of https://github.com/Loomwave/lorascan :  pip install .   (developer: pip install -e .)
 ```
 Issues and results: https://github.com/Loomwave/lorascan/issues
@@ -25,7 +25,7 @@ parts, runtime deps `python3-spidev` + `python3-libgpiod` (Recommends), `python3
 script is `lorascan = lorascan.cli:main`; profiles live inside the package (`lorascan/profiles/*.yaml`) and are
 overridable from `/etc/lorascan/profiles/` and `~/.config/lorascan/profiles/`. `pipx install <wheel>` is the
 clean per-user install on a Pi whose system Python is externally managed (PEP 668): `sudo apt install pipx`,
-then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.10/lorascan-0.1.10-py3-none-any.whl`
+then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.11/lorascan-0.1.11-py3-none-any.whl`
 (`--system-site-packages` so the apt-installed spidev/gpiod modules are visible).
 
 ## Wire and describe your radio
@@ -164,6 +164,15 @@ Point it at a CAD-hot (frequency, SF, BW); rows land in the decode table as `syn
 same window) lights CAD at neighbouring SF/BW pairs too — in one tower dataset SF9/125 never fired without
 SF11/250 in the same 3 s window. Before hunting a sync word, check the SF map for a much stronger cell at
 another SF in the same window and the band summary for a peak near the top of the scale.
+
+## Running your own share endpoint
+
+The community endpoint is a small stdlib server in this package: `lorascan-share-server --db /data/share.sqlite --port 8081`
+(routes `/healthz`, `/v1/watermark`, `/v1/share`, `/v1/stats`; idempotent upserts; 4 MB gzip / 64 MB inflated / 60 POST per
+hour per submitter; miscalibrated documents stored flagged). `deploy/share-server/` has a Dockerfile, a Kubernetes manifest,
+a systemd unit and the handover README; the protocol is documented in the Loomwave repo
+(`docs/superpowers/specs/2026-09-14-lorascan-share-endpoint.md`). A regional group can run one for itself; the public one is
+share.lorascan.app.
 
 ## Slot view, standalone SVGs, rendering from a share file
 

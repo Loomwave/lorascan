@@ -1,0 +1,80 @@
+# lorascan share endpoint at https://share.lorascan.app — one replica (SQLite on a PVC; do not scale out).
+# Fill in: the image reference, the ingress class, and the cert-manager issuer for the cluster.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lorascan
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lorascan-share-data
+  namespace: lorascan
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi          # ~50 KB gzipped/day/site at hour granularity; 5 GiB is years of a large fleet
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lorascan-share
+  namespace: lorascan
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # single writer on the SQLite volume
+  selector:
+    matchLabels: {app: lorascan-share}
+  template:
+    metadata:
+      labels: {app: lorascan-share}
+    spec:
+      securityContext:
+        fsGroup: 10001
+      containers:
+        - name: share
+          image: REGISTRY/lorascan-share-server:0.1.11     # <- fill in
+          args: ["--host", "0.0.0.0", "--port", "8081", "--db", "/data/share.sqlite", "--rate-per-hour", "60"]
+          ports: [{containerPort: 8081, name: http}]
+          volumeMounts: [{name: data, mountPath: /data}]
+          readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 10}
+          livenessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 30}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: lorascan-share-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lorascan-share
+  namespace: lorascan
+spec:
+  selector: {app: lorascan-share}
+  ports: [{port: 80, targetPort: http, name: http}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lorascan-share
+  namespace: lorascan
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt        # <- the cluster's issuer
+    nginx.ingress.kubernetes.io/proxy-body-size: "8m"  # POST bodies are <= 4 MB gzipped
+spec:
+  ingressClassName: nginx                              # <- the cluster's ingress class
+  tls:
+    - hosts: [share.lorascan.app]
+      secretName: lorascan-share-tls
+  rules:
+    - host: share.lorascan.app
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: lorascan-share, port: {name: http}}
