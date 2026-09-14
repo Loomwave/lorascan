@@ -1,0 +1,11 @@
+# systemd alternative to the container (a plain Debian host): pip install the lorascan wheel, then
+#   install -d -o lorascan /var/lib/lorascan-share && cp this file /etc/systemd/system/ && systemctl enable --now lorascan-share-server
+[Unit]
+Description=lorascan community share endpoint
+After=network-online.target
+[Service]
+User=lorascan
+ExecStart=/usr/local/bin/lorascan-share-server --host 127.0.0.1 --port 8081 --db /var/lib/lorascan-share/share.sqlite
+Restart=on-failure
+[Install]
+WantedBy=multi-user.target
