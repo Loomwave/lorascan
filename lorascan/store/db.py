@@ -22,6 +22,7 @@ class Store:
         self.path = path
         self.con = sqlite3.connect(path, timeout=30)
         self.con.execute("PRAGMA journal_mode=WAL")
+        self.con.execute("PRAGMA synchronous=NORMAL")   # WAL + NORMAL: no fsync per row (SD-card friendly); durable at checkpoints
         self.con.executescript(SCHEMA)
         self.con.commit()
 

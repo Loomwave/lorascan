@@ -24,4 +24,6 @@ def test_probe_and_selftest_on_fake(capsys):
 def test_scan_survey_duration_limit(tmp_path):
     db = str(tmp_path / "s.db")
     rc = cli.main(["scan", "survey", "--profile", "fake", "--db", db, "--dwell", "0.002", "--sample-gap", "0.001", "--duration", "1s", "--fake-clock"])
-    assert rc == 0 and len(list(Store(db).iter_energy())) > 50
+    # fake clock: each step costs SETTLE_S (0.02) + dwell (0.002) = 0.022 s, so a 1 s limit yields about 45 rows
+    n = len(list(Store(db).iter_energy()))
+    assert rc == 0 and 35 <= n <= 50
