@@ -25,6 +25,7 @@ from .measure.cad import cad_sweep
 from .measure.decode import decode_dwell
 from . import networks as netmod
 from .autoconf import AutoConfError
+from .exclusions import parse_exclusions
 from .networks import presets_on
 from .store.db import Store
 from .report.html import render_report
@@ -360,13 +361,14 @@ def cmd_status(a) -> int:
 
 def cmd_report(a) -> int:
     from .report.html import render_report_from_share, build_data_from_share, build_data, write_svgs
+    zones = [] if a.no_exclude else parse_exclusions(a.exclude)
     if a.from_share:
         with open(a.from_share) as f:
             doc = json.load(f)
-        render_report_from_share(doc, a.out, title=a.title, slot_hz=a.slot)
+        render_report_from_share(doc, a.out, title=a.title, slot_hz=a.slot, exclusions=zones)
         print(f"[report] wrote {a.out} from share document {a.from_share}")
         if a.svg:
-            for p in write_svgs(build_data_from_share(doc), a.svg):
+            for p in write_svgs(build_data_from_share(doc, exclusions=zones), a.svg):
                 print(f"[report] wrote {p}")
         return 0
     store = Store(a.db)
@@ -378,10 +380,10 @@ def cmd_report(a) -> int:
         except FileNotFoundError:
             prof_offset = 0.0
     since = (time.time() - _duration(a.since)) if a.since else None
-    render_report(store, a.out, title=a.title, run_id=a.run, bucket_s=a.bucket, rssi_offset_db=prof_offset, since=since, slot_hz=a.slot)
+    render_report(store, a.out, title=a.title, run_id=a.run, bucket_s=a.bucket, rssi_offset_db=prof_offset, since=since, slot_hz=a.slot, exclusions=zones)
     print(f"[report] wrote {a.out}")
     if a.svg:
-        for p in write_svgs(build_data(store, a.run, a.bucket, prof_offset, since), a.svg):
+        for p in write_svgs(build_data(store, a.run, a.bucket, prof_offset, since, exclusions=zones), a.svg):
             print(f"[report] wrote {p}")
     return 0
 
@@ -405,9 +407,10 @@ def cmd_export(a) -> int:
     if a.table == "slots":
         from .report.html import build_data
         from .report.slots import slot_view
-        d = build_data(store, a.run)
-        slots = slot_view(d["channels"], store.cad_summary(a.run), store.decode_summary(a.run), a.slot or 500_000)
-        cols = ["start_mhz", "end_mhz", "n_channels", "score", "busy_max", "busy_mean", "floor_worst", "floor_best", "floor_penalty", "peak_max", "cad_hit_max", "cad_sf_max", "decoded", "decoded_frames", "labels"]
+        zones = [] if a.no_exclude else parse_exclusions(a.exclude)
+        d = build_data(store, a.run, exclusions=zones)
+        slots = slot_view(d["channels"], store.cad_summary(a.run), store.decode_summary(a.run), a.slot or 500_000, exclusions=zones)
+        cols = ["start_mhz", "end_mhz", "n_channels", "excluded", "score", "busy_max", "busy_mean", "floor_worst", "floor_best", "floor_penalty", "peak_max", "cad_hit_max", "cad_sf_max", "decoded", "decoded_frames", "labels"]
         with open(a.csv, "w", newline="") as f:
             w = csv.writer(f); w.writerow(cols)
             for sl in slots:
@@ -618,11 +621,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("report"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--out", default="lorascan-report.html"); sp.add_argument("--title", default="lorascan report")
     sp.add_argument("--run", type=int, default=None); sp.add_argument("--since", default=None, help="only the last e.g. 6h / 2d"); sp.add_argument("--bucket", type=int, default=None, help="heat map bucket seconds (default: auto, <= 600 columns)"); sp.add_argument("--rssi-offset", type=float, default=None)
     sp.add_argument("--slot", type=int, default=None, help="add an N Hz slot table (e.g. 500000): worst case per window, best first")
+    sp.add_argument("--exclude", default=None, help="MHz zones measured but never recommended, e.g. 902.0-903.25,926.75-928.0 (the default: band edges + 33 cm repeater segments)")
+    sp.add_argument("--no-exclude", action="store_true", help="recommend any channel, including band edges and repeater segments")
     sp.add_argument("--svg", default=None, help="also write standalone heatmap.svg / band.svg / sfmap.svg / when.svg into this directory")
     sp.add_argument("--from-share", default=None, help="render from a share document (lorascan share output) instead of a database"); sp.set_defaults(fn=cmd_report)
     sp = sub.add_parser("export", help="CSV: energy to --csv, CAD to <stem>-cad.csv, decodes to <stem>-decode.csv (or one table with --table)"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--csv", required=True); sp.add_argument("--run", type=int, default=None)
     sp.add_argument("--table", choices=("all", "energy", "cad", "decode", "slots"), default="all", help="one table to --csv exactly, or all (default); slots = the N kHz window view")
-    sp.add_argument("--slot", type=int, default=None, help="window width Hz for --table slots (default 500000)"); sp.set_defaults(fn=cmd_export)
+    sp.add_argument("--slot", type=int, default=None, help="window width Hz for --table slots (default 500000)")
+    sp.add_argument("--exclude", default=None, help="MHz zones never recommended, e.g. 902.0-903.25,926.75-928.0 (the default)"); sp.add_argument("--no-exclude", action="store_true"); sp.set_defaults(fn=cmd_export)
     sp = sub.add_parser("share", help="write the opt-in community share file (aggregates + coarse cell; no upload yet)")
     sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--out", default="lorascan-share.json"); sp.add_argument("--run", type=int, default=None)
     sp.add_argument("--cell", default=None, help="lat,lon of the antenna; rounded to --cell-size degrees (omit for no location)")

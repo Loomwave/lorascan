@@ -40,7 +40,7 @@ def test_map_json_aggregates_cells_band_and_excludes_flagged(fleet):
     m = json.loads(body)
     assert st == 200 and "json" in ct
     assert len(m["cells"]) == 1 and m["cells"][0]["lat"] == 34.1 and m["cells"][0]["lon"] == -84.4 and m["cells"][0]["submitters"] == 2
-    assert m["cells"][0]["quietest"][0]["mhz"] == 902.0 and m["cells"][0]["busiest"][0]["mhz"] == 921.0
+    assert m["cells"][0]["quietest"][0]["mhz"] == 911.5 and m["cells"][0]["busiest"][0]["mhz"] == 921.0     # 902.0 quieter but excluded (#9)
     assert [c["mhz"] for c in m["band"]] == [902.0, 911.5, 921.0] and m["band"][0]["n_submitters"] == 3      # a, b, c (d is flagged)
     assert m["no_location_submitters"] == 1 and m["flagged_submitters"] == 1 and m["submitters"] == 4
     assert len(m["when"]) == 7 and any(v is not None for r in m["when"] for v in r)                          # from the hour-granularity rows
@@ -79,3 +79,17 @@ def test_tile_source_is_configurable_with_osm_default(tmp_path, monkeypatch):
     monkeypatch.setenv("LORASCAN_TILES_URL", "https://example.test/{z}/{x}/{y}.png"); monkeypatch.setenv("LORASCAN_TILES_ATTRIBUTION", "test attr")
     assert tiles_config(None, None) == {"url": "https://example.test/{z}/{x}/{y}.png", "attribution": "test attr"}
     assert tiles_config("https://flag.test/{z}/{x}/{y}.png", "flag attr")["url"] == "https://flag.test/{z}/{x}/{y}.png"   # flags beat env
+
+
+def test_map_page_shades_exclusions_and_ranks_viable_channels_first(fleet):
+    """Loomwave/lorascan#9 + Matt: highlight the excluded zones on the web map too."""
+    st, ct, html = _get(fleet, "/")
+    assert 'class="excl"' in html and "not an option" in html and "903.250" in html and "926.750" in html
+    st, ct, body = _get(fleet, "/v1/map.json")
+    m = json.loads(body)
+    assert m["exclusions"] == [[902.0, 903.25], [926.75, 928.0]]
+    assert m["band"][0]["mhz"] == 902.0 and m["band"][0]["excluded"] is True and m["band"][1]["excluded"] is False
+    # fleet-wide quietest table: 902.0 is the quietest channel in the fixture but excluded, so 911.5 leads
+    q = html[html.index("Quietest channels, fleet-wide"):]
+    assert q.index("911.500") < q.index("902.000") and "(excluded)" in q
+    assert m["cells"][0]["quietest"][0]["mhz"] == 911.5 and m["cells"][0]["quietest"][-1]["excluded"] is True

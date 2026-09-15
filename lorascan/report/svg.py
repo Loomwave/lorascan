@@ -61,7 +61,21 @@ def _txt(x, y, s, size=11, anchor="start", extra=""):
     return f'<text x="{x:.1f}" y="{y:.1f}" font-size="{size}" text-anchor="{anchor}" fill="currentColor" {extra}>{html.escape(str(s))}</text>'
 
 
-def heatmap_svg(heat: dict, layer: str = "busy", width: int = 1060) -> str:
+def _excl_bands_y(out, zones, y_of_mhz, x0, w, label=True):
+    """Shade exclusion zones (#9) as hatched horizontal bands on a frequency (y) axis."""
+    for lo, hi in (zones or []):
+        y1, y0 = y_of_mhz(hi / 1e6), y_of_mhz(lo / 1e6)
+        if y0 <= y1:
+            continue
+        out.append(f'<rect class="excl" x="{x0:.1f}" y="{y1:.1f}" width="{w:.1f}" height="{y0 - y1:.1f}" fill="url(#exclhatch)" stroke="currentColor" stroke-opacity="0.4" stroke-dasharray="3 3"><title>{lo / 1e6:.3f}–{hi / 1e6:.3f} MHz: excluded from recommendations (band edge / repeater segment) — not an option</title></rect>')
+        if label:
+            out.append(_txt(x0 + 4, y1 + 10, f"excluded {lo / 1e6:.3f}–{hi / 1e6:.3f}", 9, "start", 'fill-opacity="0.8"'))
+
+
+_EXCL_DEFS = '<defs><pattern id="exclhatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="currentColor" stroke-opacity="0.35" stroke-width="3"/></pattern></defs>'
+
+
+def heatmap_svg(heat: dict, layer: str = "busy", width: int = 1060, exclusions=None) -> str:
     """Occupancy heat map: rows = channels (MHz), columns = time buckets."""
     freqs = heat.get("freqs_mhz") or []
     buckets = heat.get("buckets") or []
@@ -77,7 +91,7 @@ def heatmap_svg(heat: dict, layer: str = "busy", width: int = 1060) -> str:
     vals = [v for row in z for v in row if v is not None]
     vmin, vmax = (min(vals), max(vals)) if vals else (0.0, 1.0)
     colour = (lambda v: busy_colour(v)) if layer == "busy" else (lambda v: level_colour(v, vmin, vmax))
-    out = [f'<svg class="static" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {ph + mt + mb}" width="100%" role="img" aria-label="occupancy heat map ({layer})" font-family="system-ui,sans-serif">']
+    out = [f'<svg class="static" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {ph + mt + mb}" width="100%" role="img" aria-label="occupancy heat map ({layer})" font-family="system-ui,sans-serif">', _EXCL_DEFS]
     # cells, drawn bottom-up so the lowest frequency is at the bottom like a spectrum display
     n = len(freqs)
     for i, f in enumerate(freqs):
@@ -86,6 +100,14 @@ def heatmap_svg(heat: dict, layer: str = "busy", width: int = 1060) -> str:
         for j in range(len(buckets)):
             v = row[j] if j < len(row) else None
             out.append(f'<rect x="{ml + j * cell_w:.1f}" y="{y}" width="{cell_w + 0.4:.1f}" height="{cell_h}" fill="{colour(v)}"/>')
+    if exclusions and n > 1:
+        fmin, fmax = min(freqs), max(freqs)
+        step_mhz = (fmax - fmin) / (n - 1) if n > 1 else 0.2
+        # channel i occupies row (n-1-i); map a frequency to the y of its row edge (linear in the grid)
+        def y_of_mhz(m):
+            pos = (m - fmin) / step_mhz            # rows from the bottom, in channel units
+            return mt + (n - pos - 0.5) * cell_h
+        _excl_bands_y(out, [(max(lo, int(fmin * 1e6 - step_mhz * 5e5)), min(hi, int(fmax * 1e6 + step_mhz * 5e5))) for lo, hi in exclusions], y_of_mhz, ml, pw)
     # y labels: at most ~14 evenly spaced channels, always first and last
     step = max(1, n // 13)
     for i in range(0, n, step):
@@ -120,7 +142,7 @@ def heatmap_svg(heat: dict, layer: str = "busy", width: int = 1060) -> str:
     return "".join(out)
 
 
-def band_svg(channels: list, width: int = 1060) -> str:
+def band_svg(channels: list, width: int = 1060, exclusions=None) -> str:
     """Band summary: one bar per channel from floor (P10) to peak, coloured by busy fraction."""
     chans = [c for c in channels if c.get("floor_med") is not None and c.get("peak_max") is not None]
     if not chans:
@@ -159,6 +181,15 @@ def band_svg(channels: list, width: int = 1060) -> str:
         if c.get("p90_med") is not None:
             yp = y_of(c["p90_med"])
             out.append(f'<line x1="{x:.1f}" y1="{yp:.1f}" x2="{x + bar_w:.1f}" y2="{yp:.1f}" stroke="currentColor" stroke-width="1"/>')
+    # exclusion zones (#9): hatched vertical bands, drawn over the bars, labelled once at the top
+    if exclusions:
+        out.insert(1, _EXCL_DEFS)
+        for lo, hi in exclusions:
+            xa, xb = max(ml, x_of(lo / 1e6)), min(ml + pw, x_of(hi / 1e6))
+            if xb <= xa:
+                continue
+            out.append(f'<rect class="excl" x="{xa:.1f}" y="{mt}" width="{xb - xa:.1f}" height="{ph}" fill="url(#exclhatch)" stroke="currentColor" stroke-opacity="0.4" stroke-dasharray="3 3"><title>{lo / 1e6:.3f}–{hi / 1e6:.3f} MHz: excluded from recommendations (band edge / repeater segment) — not an option</title></rect>')
+            out.append(_txt((xa + xb) / 2, mt + 12, "not an option", 9, "middle", 'fill-opacity="0.8"'))
     # labelled channels
     for c in chans:
         if c.get("label"):

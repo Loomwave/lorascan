@@ -26,7 +26,8 @@ def test_build_data_from_share_matches_the_report_shape(tmp_path):
     assert d["heat"]["bucket_s"] == 3600 and len(d["heat"]["buckets"]) == 26 and len(d["heat"]["busy"]) == 3
     assert d["channels"][2]["busy_mean"] == 0.2 and d["channels"][0]["floor_med"] == -110
     assert d["sfmap"]["sfs"] == [9] and d["sfmap"]["z"][0][0] == 0.4
-    assert d["quietest"][0]["mhz"] == 902.0 and d["span_s"] == 25 * 3600 and d["card"] is None
+    assert d["quietest"][0]["mhz"] == 911.5 and d["span_s"] == 25 * 3600 and d["card"] is None     # 902.0 is quieter but excluded (#9)
+    assert d["quietest"][-1]["mhz"] == 902.0 and d["quietest"][-1]["excluded"] is True
     day = build_data_from_share(build_share(s, None, "tok", "fake", granularity="day"))
     assert day["heat"]["bucket_s"] == 86400 and any(v is not None for r in day["when"] for v in r)
 

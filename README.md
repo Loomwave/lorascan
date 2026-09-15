@@ -12,7 +12,7 @@ phase 1 (P1): energy layer, quick and survey scans, SQLite store, HTML report, s
 
 ```
 sudo apt install python3-spidev python3-libgpiod
-pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.16/lorascan-0.1.16-py3-none-any.whl
+pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.17/lorascan-0.1.17-py3-none-any.whl
 # or from a checkout of https://github.com/Loomwave/lorascan :  pip install .   (developer: pip install -e .)
 ```
 Issues and results: https://github.com/Loomwave/lorascan/issues
@@ -25,7 +25,7 @@ parts, runtime deps `python3-spidev` + `python3-libgpiod` (Recommends), `python3
 script is `lorascan = lorascan.cli:main`; profiles live inside the package (`lorascan/profiles/*.yaml`) and are
 overridable from `/etc/lorascan/profiles/` and `~/.config/lorascan/profiles/`. `pipx install <wheel>` is the
 clean per-user install on a Pi whose system Python is externally managed (PEP 668): `sudo apt install pipx`,
-then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.16/lorascan-0.1.16-py3-none-any.whl`
+then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.17/lorascan-0.1.17-py3-none-any.whl`
 (`--system-site-packages` so the apt-installed spidev/gpiod modules are visible).
 
 ## Wire and describe your radio
@@ -173,6 +173,15 @@ hour per submitter; miscalibrated documents stored flagged). `deploy/share-serve
 a systemd unit and the handover README; the protocol is documented in the Loomwave repo
 (`docs/superpowers/specs/2026-09-14-lorascan-share-endpoint.md`). A regional group can run one for itself; the public one is
 share.lorascan.app.
+
+## Exclusion zones (what is measured but never recommended)
+
+Band edges and the 33 cm amateur repeater segments are not options for a new deployment, so by default
+`902.000–903.250` and `926.750–928.000` MHz are **excluded from recommendations**: the quietest-channels table,
+the slot ranking and the candidate card list viable channels first and strike the excluded ones through, and the
+heat map and band summary hatch the zones (in the HTML report and on the community map page). Every row is still
+collected, stored, exported and shared. Change the zones with `--exclude 902.0-903.25,926.75-928.0` (MHz pairs, on
+`report` and `export`) or switch them off with `--no-exclude`.
 
 ## Slot view, standalone SVGs, rendering from a share file
 
