@@ -242,8 +242,10 @@ def render_from_data(d: dict, out_path: str, title: str = "lorascan report", slo
     bucket_s = d["heat"]["bucket_s"]
     dec_of = {c["freq_hz"]: c.get("decoded", "") for c in d["channels"]}
     zones_hz = [tuple(z) for z in d.get("exclusions_hz", [])]
+    def _tr(flag):                      # Python 3.11: no backslashes inside f-string expressions
+        return '<tr class="excluded">' if flag else "<tr>"
     rows = "".join(
-        f"<tr{' class=\"excluded\"' if c.get('excluded') else ''}><td>{c['mhz']:.3f}{' (excluded)' if c.get('excluded') else ''}</td><td>{html.escape(c['label'])}</td><td>{c['busy_mean']*100:.1f}</td><td>{c['floor_med']:.0f}</td><td>{c['p90_med']:.0f}</td><td>{c['peak_max']:.0f}</td><td>{c['n_rows']}</td><td>{html.escape(dec_of.get(c['freq_hz'], ''))}</td></tr>"
+        f"{_tr(c.get('excluded'))}<td>{c['mhz']:.3f}{' (excluded)' if c.get('excluded') else ''}</td><td>{html.escape(c['label'])}</td><td>{c['busy_mean']*100:.1f}</td><td>{c['floor_med']:.0f}</td><td>{c['p90_med']:.0f}</td><td>{c['peak_max']:.0f}</td><td>{c['n_rows']}</td><td>{html.escape(dec_of.get(c['freq_hz'], ''))}</td></tr>"
         for c in d["quietest"])
     card_html = ""
     if d["card"]:
@@ -254,7 +256,7 @@ def render_from_data(d: dict, out_path: str, title: str = "lorascan report", slo
     if slot_hz:
         slots = slot_view(d["channels"], d.get("cad_rows", []), d.get("decodes", []), slot_hz, exclusions=zones_hz)
         d["slots"] = slots
-        srows = "".join(f"<tr{' class=\"excluded\"' if w.get('excluded') else ''}><td>{i+1}</td><td>{w['start_mhz']:.3f}–{w['end_mhz']:.3f}{' (excluded)' if w.get('excluded') else ''}</td><td>{w['n_channels']}</td><td>{w['score']:.3f}</td><td>{w['busy_max']*100:.1f}</td><td>{w['floor_worst']:.0f} (+{w['floor_penalty']:.2f})</td><td>{w['peak_max']:.0f}</td>"
+        srows = "".join(f"{_tr(w.get('excluded'))}<td>{i+1}</td><td>{w['start_mhz']:.3f}–{w['end_mhz']:.3f}{' (excluded)' if w.get('excluded') else ''}</td><td>{w['n_channels']}</td><td>{w['score']:.3f}</td><td>{w['busy_max']*100:.1f}</td><td>{w['floor_worst']:.0f} (+{w['floor_penalty']:.2f})</td><td>{w['peak_max']:.0f}</td>"
                         f"<td>{w['cad_hit_max']*100:.1f}{(' SF%d' % w['cad_sf_max']) if w['cad_sf_max'] else ''}</td><td>{html.escape(w['decoded'])}</td><td>{html.escape(w['labels'])}</td></tr>" for i, w in enumerate(slots))
         slot_html = (f"<h2>{slot_hz/1000:g} kHz slots, best first</h2><div class=\"note\">worst case of the channels inside each window: score = busiest channel's busy fraction + highest CAD hit rate + decoded frames / 10 + (worst floor − best floor in the band) / 10 dB (lower is better; the floor term keeps a steady carrier from ranking clean).</div>"
                      "<table><thead><tr><th>rank</th><th>window MHz</th><th>ch</th><th>score</th><th>busy max %</th><th>floor worst dBm (penalty)</th><th>peak dBm</th><th>CAD hit max %</th><th>decoded</th><th>who lives here</th></tr></thead><tbody>" + srows + "</tbody></table>")
