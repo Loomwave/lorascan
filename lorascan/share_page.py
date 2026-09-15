@@ -159,7 +159,9 @@ def render_map_page(m: dict, tiles: dict | None = None) -> str:
         parts.append('<div class="fig">' + band_svg(m["band"], exclusions=zones_hz) + '</div>')
         if m.get("exclusions"):
             parts.append('<div class="note">Hatched = excluded from recommendations (band edges and the 33 cm amateur repeater segments: ' + ", ".join(f"{lo:.3f}–{hi:.3f} MHz" for lo, hi in m["exclusions"]) + '). Data is still collected there; those channels are listed last and struck through.</div>')
-        rows = "".join(f"<tr{' class=\"excluded\"' if c.get('excluded') else ''}><td>{c['mhz']:.3f}{' (excluded)' if c.get('excluded') else ''}</td><td>{e(c['label'])}</td><td>{c['busy_mean'] * 100:.1f}</td><td>{c['floor_med']:.0f}</td><td>{c['peak_max']:.0f}</td><td>{c['n_submitters']}</td><td>{c['hours']:.1f}</td></tr>"
+        def _tr(flag):                  # Python 3.11: no backslashes inside f-string expressions
+            return '<tr class="excluded">' if flag else "<tr>"
+        rows = "".join(f"{_tr(c.get('excluded'))}<td>{c['mhz']:.3f}{' (excluded)' if c.get('excluded') else ''}</td><td>{e(c['label'])}</td><td>{c['busy_mean'] * 100:.1f}</td><td>{c['floor_med']:.0f}</td><td>{c['peak_max']:.0f}</td><td>{c['n_submitters']}</td><td>{c['hours']:.1f}</td></tr>"
                        for c in sorted(m["band"], key=lambda c: (bool(c.get("excluded")), c["busy_mean"], c["floor_med"] if c["floor_med"] is not None else 0))[:15])
         parts.append('<h2>Quietest channels, fleet-wide</h2><table><thead><tr><th>MHz</th><th>who lives here</th><th>busy %</th><th>floor dBm</th><th>peak dBm</th><th>submitters</th><th>hours</th></tr></thead><tbody>' + rows + '</tbody></table>')
         if any(v is not None for r in m["when"] for v in r):
