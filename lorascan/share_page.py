@@ -6,9 +6,11 @@ import datetime as dt
 import html
 from .plan.grid import label_for
 from .report.svg import busy_colour, band_svg, when_svg
+from .exclusions import DEFAULT_EXCLUSIONS, excluded, zones_mhz
 
 
-def map_data(db) -> dict:
+def map_data(db, exclusions=None) -> dict:
+    exclusions = list(DEFAULT_EXCLUSIONS) if exclusions is None else list(exclusions)
     con = db.con
     subs = con.execute("SELECT submitter, tool, board, calibration, cell_lat, cell_lon, cell_size, uploads, last_seen FROM submitters ORDER BY last_seen DESC").fetchall()
     flagged = {r[0] for r in con.execute("SELECT DISTINCT submitter FROM energy WHERE flagged = 1")}
@@ -38,19 +40,20 @@ def map_data(db) -> dict:
     for f in sorted(band_acc):
         b = band_acc[f]
         band.append({"freq_hz": f, "mhz": f / 1e6, "label": label_for(f), "floor_med": med(b["floors"]), "p90_med": med(b["floors"]) if not b["floors"] else med(b["floors"]),
-                     "peak_max": b["peak"], "busy_mean": round(sum(b["busy"]) / len(b["busy"]), 4), "n_submitters": len(b["subs"]), "hours": round(b["hours"], 2)})
+                     "peak_max": b["peak"], "busy_mean": round(sum(b["busy"]) / len(b["busy"]), 4), "n_submitters": len(b["subs"]), "hours": round(b["hours"], 2),
+                     "excluded": excluded(f, exclusions)})
     cells = []
     for (lat, lon, size), ca in sorted(cell_acc.items()):
-        chans = [{"mhz": f / 1e6, "busy": round(sum(v["busy"]) / len(v["busy"]), 4), "floor": med(v["floors"]), "label": label_for(f)} for f, v in sorted(ca["chan"].items())]
+        chans = [{"mhz": f / 1e6, "busy": round(sum(v["busy"]) / len(v["busy"]), 4), "floor": med(v["floors"]), "label": label_for(f), "excluded": excluded(f, exclusions)} for f, v in sorted(ca["chan"].items())]
         allbusy = [c["busy"] for c in chans]
         cells.append({"lat": lat, "lon": lon, "size_deg": size, "submitters": len(ca["subs"]), "hours": round(ca["hours"], 2),
                       "busy_mean": round(sum(allbusy) / len(allbusy), 4) if allbusy else None,
-                      "quietest": sorted(chans, key=lambda c: (c["busy"], c["floor"] if c["floor"] is not None else 0))[:5],
+                      "quietest": sorted(chans, key=lambda c: (c["excluded"], c["busy"], c["floor"] if c["floor"] is not None else 0))[:5],
                       "busiest": sorted(chans, key=lambda c: -c["busy"])[:5]})
     when = [[(round(when_acc[(wd, h)][0] / when_acc[(wd, h)][1], 4) if (wd, h) in when_acc else None) for h in range(24)] for wd in range(7)]
     return {"generated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "submitters": len(subs),
             "flagged_submitters": len(flagged), "no_location_submitters": sum(1 for s in subs if s[4] is None and s[0] not in flagged),
-            "cells": cells, "band": band, "when": when,
+            "cells": cells, "band": band, "when": when, "exclusions": zones_mhz(exclusions), "exclusions_hz": [list(z) for z in exclusions],
             "submitter_rows": [{"id": s[0][:8], "tool": s[1], "board": s[2], "calibration": s[3], "cell": (f"{s[4]:.1f},{s[5]:.1f}" if s[4] is not None else "none"),
                                 "uploads": s[7], "last_seen": dt.datetime.fromtimestamp(s[8], dt.timezone.utc).strftime("%Y-%m-%d %H:%MZ") if s[8] else "", "flagged": s[0] in flagged} for s in subs]}
 
@@ -96,7 +99,7 @@ main{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:1.2re
 h1{margin:0;font-size:1.5rem} h2{margin:1rem 0 .3rem;font-size:1.1rem} .meta{color:var(--muted);font-size:.9rem;display:flex;gap:1.2rem;flex-wrap:wrap}
 .fig{background:var(--paper);border:1px solid var(--line);padding:.5rem} .fig svg{display:block;color:var(--ink)}
 table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:.9rem} th,td{padding:.3rem .6rem;border-bottom:1px solid var(--line);text-align:right} th:first-child,td:first-child{text-align:left}
-.note{color:var(--muted);font-size:.85rem} a{color:var(--accent)}
+.note{color:var(--muted);font-size:.85rem} a{color:var(--accent)} tr.excluded td{color:var(--muted);text-decoration:line-through}
 """
 
 
@@ -152,9 +155,12 @@ def render_map_page(m: dict, tiles: dict | None = None) -> str:
         parts.append('<div class="fig"><div id="cells-static">' + (cells_svg(m["cells"]) or '<p class="note">no cells with a location yet</p>') + '</div>'
                      '<div id="leaflet-map" style="height:480px" hidden></div><div id="basemap-note" class="note">basemap: loading OpenStreetMap tiles via Leaflet… (the grid above is the no-script view)</div></div>')
         parts.append('<h2>Band summary, all submitters</h2><div class="note">bar = median floor to maximum peak across submitters; colour = mean busy fraction; label = who is known to live there.</div>')
-        parts.append('<div class="fig">' + band_svg(m["band"]) + '</div>')
-        rows = "".join(f"<tr><td>{c['mhz']:.3f}</td><td>{e(c['label'])}</td><td>{c['busy_mean'] * 100:.1f}</td><td>{c['floor_med']:.0f}</td><td>{c['peak_max']:.0f}</td><td>{c['n_submitters']}</td><td>{c['hours']:.1f}</td></tr>"
-                       for c in sorted(m["band"], key=lambda c: (c["busy_mean"], c["floor_med"] if c["floor_med"] is not None else 0))[:15])
+        zones_hz = [tuple(z) for z in m.get("exclusions_hz", [])]
+        parts.append('<div class="fig">' + band_svg(m["band"], exclusions=zones_hz) + '</div>')
+        if m.get("exclusions"):
+            parts.append('<div class="note">Hatched = excluded from recommendations (band edges and the 33 cm amateur repeater segments: ' + ", ".join(f"{lo:.3f}–{hi:.3f} MHz" for lo, hi in m["exclusions"]) + '). Data is still collected there; those channels are listed last and struck through.</div>')
+        rows = "".join(f"<tr{' class=\"excluded\"' if c.get('excluded') else ''}><td>{c['mhz']:.3f}{' (excluded)' if c.get('excluded') else ''}</td><td>{e(c['label'])}</td><td>{c['busy_mean'] * 100:.1f}</td><td>{c['floor_med']:.0f}</td><td>{c['peak_max']:.0f}</td><td>{c['n_submitters']}</td><td>{c['hours']:.1f}</td></tr>"
+                       for c in sorted(m["band"], key=lambda c: (bool(c.get("excluded")), c["busy_mean"], c["floor_med"] if c["floor_med"] is not None else 0))[:15])
         parts.append('<h2>Quietest channels, fleet-wide</h2><table><thead><tr><th>MHz</th><th>who lives here</th><th>busy %</th><th>floor dBm</th><th>peak dBm</th><th>submitters</th><th>hours</th></tr></thead><tbody>' + rows + '</tbody></table>')
         if any(v is not None for r in m["when"] for v in r):
             parts.append('<h2>When is it busy</h2><div class="note">mean busy fraction by weekday and UTC hour, from hour-granularity uploads.</div><div class="fig">' + when_svg(m["when"]) + '</div>')

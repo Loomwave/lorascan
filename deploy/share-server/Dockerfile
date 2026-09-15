@@ -1,5 +1,5 @@
 # lorascan community share endpoint (reference implementation) — stdlib only, SQLite on a volume.
-# Build from the repo root:  docker build -f deploy/share-server/Dockerfile -t lorascan-share-server:0.1.15 .
+# Build from the repo root:  docker build -f deploy/share-server/Dockerfile -t lorascan-share-server:0.1.17 .
 FROM python:3.12-slim
 WORKDIR /app
 COPY pyproject.toml README.md ./

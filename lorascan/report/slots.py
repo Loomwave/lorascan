@@ -1,11 +1,12 @@
 """N kHz slot view (Loomwave/lorascan#2 item 3): bucket per-channel rows into fixed windows across the
 band and report the WORST case per window, so 'which 500 kHz slot is least hit' is one table."""
 from __future__ import annotations
+from ..exclusions import overlaps
 
 BAND_START_HZ = 902_000_000
 
 
-def slot_view(channels: list, cad: list, decodes: list, slot_hz: int = 500_000, start_hz: int = BAND_START_HZ) -> list:
+def slot_view(channels: list, cad: list, decodes: list, slot_hz: int = 500_000, start_hz: int = BAND_START_HZ, exclusions=None) -> list:
     """channels/cad/decodes are the report's per-channel dicts (channel_summary, cad_summary, decode_summary
     or the share document's rows). Returns windows sorted best (quietest) first. score = busy_max +
     cad_hit_max + decoded_frames/10 + floor_penalty, where floor_penalty = (floor_worst - best floor in
@@ -48,6 +49,7 @@ def slot_view(channels: list, cad: list, decodes: list, slot_hz: int = 500_000, 
                     "cad_hit_max": round(w["cad_hit_max"], 4), "cad_sf_max": w["cad_sf_max"],
                     "decoded": ", ".join(f"{n}:{c}" for n, c in sorted(w["dec"].items())), "decoded_frames": frames,
                     "labels": ", ".join(sorted(w["labels"])), "floor_penalty": floor_pen,
+                    "excluded": overlaps(w["start_hz"], w["end_hz"], exclusions),          # #9: not an option, listed last
                     "score": round(w["busy_max"] + w["cad_hit_max"] + frames / 10 + floor_pen, 4)})
-    out.sort(key=lambda w: (w["score"], w["peak_max"] if w["peak_max"] is not None else 0, w["floor_worst"] if w["floor_worst"] is not None else 0))
+    out.sort(key=lambda w: (w["excluded"], w["score"], w["peak_max"] if w["peak_max"] is not None else 0, w["floor_worst"] if w["floor_worst"] is not None else 0))
     return out
