@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: lorascan
-Version: 0.1.17
+Version: 0.1.18
 Summary: LoRa-chipset band scanner and interference heat map for 902-928 MHz (SX1262 on Debian)
 License: Apache-2.0
 Requires-Python: >=3.11
@@ -29,7 +29,7 @@ phase 1 (P1): energy layer, quick and survey scans, SQLite store, HTML report, s
 
 ```
 sudo apt install python3-spidev python3-libgpiod
-pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.17/lorascan-0.1.17-py3-none-any.whl
+pip install https://github.com/Loomwave/lorascan/releases/download/v0.1.18/lorascan-0.1.18-py3-none-any.whl
 # or from a checkout of https://github.com/Loomwave/lorascan :  pip install .   (developer: pip install -e .)
 ```
 Issues and results: https://github.com/Loomwave/lorascan/issues
@@ -42,7 +42,7 @@ parts, runtime deps `python3-spidev` + `python3-libgpiod` (Recommends), `python3
 script is `lorascan = lorascan.cli:main`; profiles live inside the package (`lorascan/profiles/*.yaml`) and are
 overridable from `/etc/lorascan/profiles/` and `~/.config/lorascan/profiles/`. `pipx install <wheel>` is the
 clean per-user install on a Pi whose system Python is externally managed (PEP 668): `sudo apt install pipx`,
-then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.17/lorascan-0.1.17-py3-none-any.whl`
+then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.18/lorascan-0.1.18-py3-none-any.whl`
 (`--system-site-packages` so the apt-installed spidev/gpiod modules are visible).
 
 ## Wire and describe your radio

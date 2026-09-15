@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.19 — 2026-09-15
+- Hotfix 2: the map page (`lorascan-share-server` GET /, since 0.1.13) nested an f-string that reused its enclosing quote — also Python 3.12-only — so a self-hosted server on Debian 12 raised SyntaxError. Fixed. The suite's static check now walks the 3.12 tokenizer's f-string tokens (catches both shipped forms), and the release script refuses to publish unless the package compiles on the bench's Python 3.11.
+
 ## 0.1.18 — 2026-09-15
 - Hotfix: 0.1.17's report and map page used a Python 3.12-only f-string form and failed with `SyntaxError` on Python 3.11 (Debian 12). Fixed, plus a test that compiles the package under python3.11 when present and a static check for the 3.12-only pattern. Install 0.1.18 instead of 0.1.17.
 

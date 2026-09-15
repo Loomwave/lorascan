@@ -68,6 +68,7 @@ tests/test_ops.py
 tests/test_plans.py
 tests/test_plans_p2.py
 tests/test_profile.py
+tests/test_py311_syntax.py
 tests/test_report.py
 tests/test_report_p2.py
 tests/test_report_share.py
