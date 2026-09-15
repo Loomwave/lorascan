@@ -167,8 +167,10 @@ def render_map_page(m: dict, tiles: dict | None = None) -> str:
         if any(v is not None for r in m["when"] for v in r):
             parts.append('<h2>When is it busy</h2><div class="note">mean busy fraction by weekday and UTC hour, from hour-granularity uploads.</div><div class="fig">' + when_svg(m["when"]) + '</div>')
         if m["cells"]:
+            def _top3(qs):              # Python 3.11: no nested f-string reusing the enclosing quote
+                return e(", ".join("%.1f (%.0f %%)%s" % (q["mhz"], q["busy"] * 100, " excl." if q.get("excluded") else "") for q in qs[:3]))
             crows = "".join(f"<tr><td><a href=\"https://www.openstreetmap.org/#map=11/{c['lat']}/{c['lon']}\">{c['lat']:.1f}, {c['lon']:.1f}</a></td><td>{c['submitters']}</td><td>{c['hours']:.1f}</td><td>{(c['busy_mean'] or 0) * 100:.1f}</td>"
-                            f"<td>{e(', '.join(f'{q['mhz']:.1f} ({q['busy'] * 100:.0f} %)' for q in c['quietest'][:3]))}</td><td>{e(', '.join(f'{q['mhz']:.1f} ({q['busy'] * 100:.0f} %)' for q in c['busiest'][:3]))}</td></tr>" for c in m["cells"])
+                            f"<td>{_top3(c['quietest'])}</td><td>{_top3(c['busiest'])}</td></tr>" for c in m["cells"])
             parts.append('<h2>Cells</h2><table><thead><tr><th>cell</th><th>submitters</th><th>hours</th><th>busy %</th><th>quietest MHz</th><th>busiest MHz</th></tr></thead><tbody>' + crows + '</tbody></table>')
         srows = "".join(f"<tr><td>{e(s['id'])}…{' (flagged)' if s['flagged'] else ''}</td><td>{e(str(s['board']))}</td><td>{e(str(s['tool']))}</td><td>{e(str(s['calibration']))}</td><td>{e(s['cell'])}</td><td>{s['uploads']}</td><td>{e(s['last_seen'])}</td></tr>" for s in m["submitter_rows"])
         parts.append('<h2>Submitters</h2><table><thead><tr><th>token</th><th>board</th><th>tool</th><th>levels</th><th>cell</th><th>uploads</th><th>last upload</th></tr></thead><tbody>' + srows + '</tbody></table>')
