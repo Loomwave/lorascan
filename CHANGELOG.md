@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.17 — 2026-09-15
+- Exclusion zones (Loomwave/lorascan#9, pinztrek): 902.000–903.250 and 926.750–928.000 MHz (band edges + 33 cm repeater segments) are measured but never recommended — quietest channels, the slot ranking and the candidate card list viable channels first and strike excluded ones through; the heat map, band summary (static SVG and plotly) and the community map page hatch the zones. `--exclude a-b,c-d` (MHz) overrides, `--no-exclude` disables. `map.json` and the report JSON carry `exclusions`; slot CSV gains an `excluded` column.
+
 ## 0.1.16 — 2026-09-14
 - Listening time is measured, not guessed: every energy row now stores its dwell (`dwell_s`; existing databases gain the column automatically), and the share document's `hours` sums it. 0.1.4–0.1.15 computed hours as samples × 8.2 µs, which is right for the on-chip scan engine and ~0 for the polled engine — a polled submitter's cell showed 0.0 h on the community map. Rows written before this release fall back to an estimate by engine.
 
