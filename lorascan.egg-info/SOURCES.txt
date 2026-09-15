@@ -5,6 +5,7 @@ lorascan/__init__.py
 lorascan/__main__.py
 lorascan/autoconf.py
 lorascan/cli.py
+lorascan/exclusions.py
 lorascan/mqtt.py
 lorascan/networks.py
 lorascan/profile.py
@@ -55,9 +56,11 @@ tests/test_cli.py
 tests/test_cli_p2.py
 tests/test_decode.py
 tests/test_energy.py
+tests/test_exclusions.py
 tests/test_export_tables.py
 tests/test_fake_hal.py
 tests/test_grid.py
+tests/test_hours_fidelity.py
 tests/test_issue2_rest.py
 tests/test_lorawan_rates.py
 tests/test_mqtt.py

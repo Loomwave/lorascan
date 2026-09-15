@@ -10,14 +10,15 @@ from ..plan.candidate import rank_candidates
 
 from .svg import heatmap_svg, band_svg, sfmap_svg, when_svg  # noqa: E402
 from .slots import slot_view  # noqa: E402
+from ..exclusions import DEFAULT_EXCLUSIONS, tag_channels, zones_mhz  # noqa: E402
 import os  # noqa: E402
 
 PLOTLY_URL = "https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js"
 
 
 def quietest(channels: list[dict], n: int = 10) -> list[dict]:
-    """Rank by busy fraction, then by the lowest P90, then by the lowest floor."""
-    return sorted(channels, key=lambda c: (round(c["busy_mean"], 3), c["p90_med"], c["floor_med"]))[:n]
+    """Rank by busy fraction, then by the lowest P90, then by the lowest floor; excluded channels (#9) come last."""
+    return sorted(channels, key=lambda c: (bool(c.get("excluded")), round(c["busy_mean"], 3), c["p90_med"], c["floor_med"]))[:n]
 
 
 def _iso(ts: float) -> str:
@@ -32,7 +33,8 @@ def auto_bucket_s(span_s: float, max_cols: int = 600) -> int:
     return 3600
 
 
-def build_data(store, run_id=None, bucket_s: int | None = 60, rssi_offset_db: float = 0.0, since: float | None = None) -> dict:
+def build_data(store, run_id=None, bucket_s: int | None = 60, rssi_offset_db: float = 0.0, since: float | None = None, exclusions=None) -> dict:
+    exclusions = list(DEFAULT_EXCLUSIONS) if exclusions is None else list(exclusions)
     if not bucket_s:
         rs = [r for r in store.runs() if (run_id is None or r["id"] == run_id) and r["first_ts"]]
         span = (max(r["last_ts"] for r in rs) - min(r["first_ts"] for r in rs)) if rs else 0.0
@@ -41,6 +43,7 @@ def build_data(store, run_id=None, bucket_s: int | None = 60, rssi_offset_db: fl
     for c in chans:
         c["label"] = label_for(c["freq_hz"])
         c["mhz"] = c["freq_hz"] / 1e6
+    tag_channels(chans, exclusions)
     freqs = [c["freq_hz"] for c in chans]
     tb = store.time_buckets(bucket_s, run_id, since)
     buckets = sorted({b["bucket"] for b in tb})
@@ -112,8 +115,8 @@ def build_data(store, run_id=None, bucket_s: int | None = 60, rssi_offset_db: fl
         "calibration": "calibrated (offset %+.1f dB applied)" % rssi_offset_db if rssi_offset_db else "relative (uncalibrated)",
         "channels": [{**c, "floor_med": c["floor_med"] + rssi_offset_db, "p90_med": c["p90_med"] + rssi_offset_db, "peak_max": c["peak_max"] + rssi_offset_db} for c in chans],
         "heat": {"freqs_mhz": [f / 1e6 for f in freqs], "buckets": [_iso(b) for b in buckets], "busy": z_busy, "p90": z_p90, "bucket_s": bucket_s},
-        "when": when, "span_s": span,
-        "quietest": [{k: c[k] for k in ("freq_hz", "mhz", "label", "busy_mean", "floor_med", "p90_med", "peak_max", "n_rows")} for c in quietest(
+        "when": when, "span_s": span, "exclusions": zones_mhz(exclusions), "exclusions_hz": [list(z) for z in exclusions],
+        "quietest": [{k: c[k] for k in ("freq_hz", "mhz", "label", "busy_mean", "floor_med", "p90_med", "peak_max", "n_rows", "excluded")} for c in quietest(
             [{**c, "floor_med": c["floor_med"] + rssi_offset_db, "p90_med": c["p90_med"] + rssi_offset_db, "peak_max": c["peak_max"] + rssi_offset_db} for c in chans], 10)],
     }
 
@@ -128,7 +131,7 @@ main{{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:1.2r
 h1{{margin:0;font-size:1.5rem}} h2{{margin:1rem 0 .3rem;font-size:1.1rem}} .meta{{color:var(--muted);font-size:.9rem;display:flex;gap:1.2rem;flex-wrap:wrap}}
 .fig{{background:var(--paper);border:1px solid var(--line);padding:.5rem}} .static-wrap svg{{display:block;color:var(--ink)}} .plot{{min-height:320px}} #plotly-note{{color:var(--muted);font-size:.8rem}}
 table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:.9rem}} th,td{{padding:.3rem .6rem;border-bottom:1px solid var(--line);text-align:right}} th:nth-child(2),td:nth-child(2){{text-align:left}}
-.note{{color:var(--muted);font-size:.85rem}}
+.note{{color:var(--muted);font-size:.85rem}} tr.excluded td{{color:var(--muted);text-decoration:line-through}}
 </style></head><body><main>
 <h1>{title}</h1>
 <div class="meta"><span>generated {generated}</span><span>{source}</span><span>runs: {runs}</span><span>levels: <b>{calibration}</b></span><span>bucket {bucket_s}s</span></div>
@@ -140,6 +143,7 @@ table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;fon
 <div id="sf-wrap" {sf_hidden}><h2>LoRa presence by spreading factor</h2><div class="note">Channel Activity Detection hit rate per (frequency, SF): the LoRa-specific detector, blind across SFs by design. {fa_note}</div><div class="fig"><div class="static-wrap" id="sfmap-static">{sf_svg}</div><div id="sfmap" class="plot" hidden></div></div></div>
 {card_html}
 {slot_html}
+<div class="note" id="excl-note">{excl_note}</div>
 <h2>Quietest channels</h2>
 <table><thead><tr><th>MHz</th><th>who lives here</th><th>busy %</th><th>floor dBm</th><th>P90 dBm</th><th>peak dBm</th><th>rows</th><th>decoded</th></tr></thead><tbody>{quiet_rows}</tbody></table>
 <div class="note">Levels are {calibration}. Busy threshold and floor definition: floor = P10 of the dwell's samples, busy = samples above floor + 8 dB (lorascan defaults).</div>
@@ -151,12 +155,14 @@ const NOTE=document.getElementById('plotly-note');
 if(typeof Plotly==='undefined'){{NOTE.textContent='interactive charts unavailable: plotly.js did not load from '+{plotly_json}+' (offline or blocked CDN). The static charts above are complete.';}}else{{try{{
 const D=JSON.parse(document.getElementById('lorascan-data').textContent);
 const dark=matchMedia('(prefers-color-scheme: dark)').matches;
+const EXY=(D.exclusions||[]).map(z=>({{type:'rect',xref:'paper',yref:'y',x0:0,x1:1,y0:z[0],y1:z[1],fillcolor:'rgba(128,128,128,0.28)',line:{{width:1,color:'rgba(128,128,128,0.8)',dash:'dot'}}}}));
+const EXX=(D.exclusions||[]).map(z=>({{type:'rect',xref:'x',yref:'paper',x0:z[0],x1:z[1],y0:0,y1:1,fillcolor:'rgba(128,128,128,0.28)',line:{{width:1,color:'rgba(128,128,128,0.8)',dash:'dot'}}}}));
 const lay=(t)=>({{margin:{{l:70,r:20,t:30,b:60}},paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'rgba(0,0,0,0)',font:{{color:dark?'#E4EAF0':'#1B2430'}},title:t}});
 const heatBusy={{type:'heatmap',x:D.heat.buckets,y:D.heat.freqs_mhz,z:D.heat.busy,colorscale:'YlOrRd',zmin:0,zmax:1,colorbar:{{title:'busy'}},hovertemplate:'%{{y}} MHz<br>%{{x}}<br>busy %{{z}}<extra></extra>'}};
 const heatP90={{type:'heatmap',x:D.heat.buckets,y:D.heat.freqs_mhz,z:D.heat.p90,colorscale:'Viridis',colorbar:{{title:'P90 dBm'}},visible:false,hovertemplate:'%{{y}} MHz<br>%{{x}}<br>P90 %{{z}} dBm<extra></extra>'}};
-document.getElementById('heat').hidden=false;Plotly.newPlot('heat',[heatBusy,heatP90],Object.assign(lay(''),{{yaxis:{{title:'MHz'}},xaxis:{{title:'time (UTC)'}},updatemenus:[{{type:'buttons',x:0,y:1.15,buttons:[{{label:'busy fraction',method:'update',args:[{{visible:[true,false]}}]}},{{label:'P90 level',method:'update',args:[{{visible:[false,true]}}]}}]}}]}}),{{responsive:true}});
+document.getElementById('heat').hidden=false;Plotly.newPlot('heat',[heatBusy,heatP90],Object.assign(lay(''),{{shapes:EXY,yaxis:{{title:'MHz'}},xaxis:{{title:'time (UTC)'}},updatemenus:[{{type:'buttons',x:0,y:1.15,buttons:[{{label:'busy fraction',method:'update',args:[{{visible:[true,false]}}]}},{{label:'P90 level',method:'update',args:[{{visible:[false,true]}}]}}]}}]}}),{{responsive:true}});
 const C=D.channels;
-document.getElementById('band').hidden=false;Plotly.newPlot('band',[{{type:'bar',x:C.map(c=>c.mhz),y:C.map(c=>c.peak_max-c.floor_med),base:C.map(c=>c.floor_med),marker:{{color:C.map(c=>c.busy_mean),colorscale:'YlOrRd',cmin:0,cmax:1}},text:C.map(c=>(c.busy_mean*100).toFixed(1)+'%'+(c.label?' · '+c.label:'')),textposition:'outside',hovertemplate:'%{{x}} MHz<br>floor %{{base}} dBm → peak %{{y}}<extra></extra>',width:0.15}}],Object.assign(lay(''),{{yaxis:{{title:'dBm'}},xaxis:{{title:'MHz'}}}}),{{responsive:true}});
+document.getElementById('band').hidden=false;Plotly.newPlot('band',[{{type:'bar',x:C.map(c=>c.mhz),y:C.map(c=>c.peak_max-c.floor_med),base:C.map(c=>c.floor_med),marker:{{color:C.map(c=>c.busy_mean),colorscale:'YlOrRd',cmin:0,cmax:1}},text:C.map(c=>(c.busy_mean*100).toFixed(1)+'%'+(c.label?' · '+c.label:'')),textposition:'outside',hovertemplate:'%{{x}} MHz<br>floor %{{base}} dBm → peak %{{y}}<extra></extra>',width:0.15}}],Object.assign(lay(''),{{shapes:EXX,yaxis:{{title:'dBm'}},xaxis:{{title:'MHz'}}}}),{{responsive:true}});
 if(D.sfmap.sfs.length){{document.getElementById('sf-wrap').hidden=false;document.getElementById('sfmap').hidden=false;Plotly.newPlot('sfmap',[{{type:'heatmap',x:D.sfmap.sfs.map(s=>'SF'+s),y:D.sfmap.freqs_mhz,z:D.sfmap.z,colorscale:'YlOrRd',zmin:0,zmax:1,colorbar:{{title:'CAD hit rate'}}}}],Object.assign(lay(''),{{yaxis:{{title:'MHz'}}}}),{{responsive:true}});}}
 if(D.span_s>3600){{document.getElementById('when-wrap').hidden=false;document.getElementById('when').hidden=false;Plotly.newPlot('when',[{{type:'heatmap',x:[...Array(24).keys()],y:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],z:D.when,colorscale:'YlOrRd',zmin:0,zmax:1,colorbar:{{title:'busy'}}}}],Object.assign(lay(''),{{xaxis:{{title:'hour (UTC)'}}}}),{{responsive:true}});}}
 for(const id of ['heat','band','when','sfmap']){{const s=document.getElementById(id+'-static');if(s&&!document.getElementById(id).hidden)s.hidden=true;}}
@@ -166,7 +172,8 @@ NOTE.textContent='interactive charts: plotly.js '+Plotly.version+' (hover for va
 """
 
 
-def build_data_from_share(doc: dict) -> dict:
+def build_data_from_share(doc: dict, exclusions=None) -> dict:
+    exclusions = list(DEFAULT_EXCLUSIONS) if exclusions is None else list(exclusions)
     """The report's data dict from a share document alone (Loomwave/lorascan#3): heat map at the share's
     granularity, per-channel summary as medians over its buckets, SF map from cad rows, when-matrix from
     the document (day granularity) or nothing."""
@@ -198,6 +205,7 @@ def build_data_from_share(doc: dict) -> dict:
         i, j = cad_freqs.index(c["freq_hz"]), sfs.index(c["sf"])
         z[i][j] = round(max(c["hit_rate"], z[i][j] or 0.0), 4)
     decs = doc.get("decode", [])
+    tag_channels(chans, exclusions)
     for c in chans:
         c["decoded"] = ", ".join(f"{d['network']}/{d['preset']} {d['n_ok']}" for d in decs if d["freq_hz"] == c["freq_hz"] and d.get("n_ok"))
         rates = [x["hit_rate"] for x in cads if x["freq_hz"] == c["freq_hz"]]
@@ -210,7 +218,8 @@ def build_data_from_share(doc: dict) -> dict:
             "generated": _iso(dt.datetime.now(dt.timezone.utc).timestamp()), "runs": [], "rssi_offset_db": 0.0,
             "calibration": doc.get("calibration", "relative (uncalibrated)"), "channels": chans,
             "heat": {"freqs_mhz": [f / 1e6 for f in freqs], "buckets": iso_b, "busy": z_busy, "p90": z_p90, "bucket_s": bucket_s},
-            "when": when, "span_s": span, "quietest": [{k: c[k] for k in ("freq_hz", "mhz", "label", "busy_mean", "floor_med", "p90_med", "peak_max", "n_rows")} for c in quietest(chans, 10)],
+            "when": when, "span_s": span, "exclusions": zones_mhz(exclusions), "exclusions_hz": [list(z) for z in exclusions],
+            "quietest": [{k: c[k] for k in ("freq_hz", "mhz", "label", "busy_mean", "floor_med", "p90_med", "peak_max", "n_rows", "excluded")} for c in quietest(chans, 10)],
             "source": f"from share document ({doc.get('tool', '?')}, {doc.get('board', '?')}, submitter {str(doc.get('submitter', ''))[:8]}…, granularity {gran}, cell {doc.get('cell')})"}
 
 
@@ -232,8 +241,9 @@ def write_svgs(d: dict, out_dir: str) -> list:
 def render_from_data(d: dict, out_path: str, title: str = "lorascan report", slot_hz: int | None = None) -> str:
     bucket_s = d["heat"]["bucket_s"]
     dec_of = {c["freq_hz"]: c.get("decoded", "") for c in d["channels"]}
+    zones_hz = [tuple(z) for z in d.get("exclusions_hz", [])]
     rows = "".join(
-        f"<tr><td>{c['mhz']:.3f}</td><td>{html.escape(c['label'])}</td><td>{c['busy_mean']*100:.1f}</td><td>{c['floor_med']:.0f}</td><td>{c['p90_med']:.0f}</td><td>{c['peak_max']:.0f}</td><td>{c['n_rows']}</td><td>{html.escape(dec_of.get(c['freq_hz'], ''))}</td></tr>"
+        f"<tr{' class=\"excluded\"' if c.get('excluded') else ''}><td>{c['mhz']:.3f}{' (excluded)' if c.get('excluded') else ''}</td><td>{html.escape(c['label'])}</td><td>{c['busy_mean']*100:.1f}</td><td>{c['floor_med']:.0f}</td><td>{c['p90_med']:.0f}</td><td>{c['peak_max']:.0f}</td><td>{c['n_rows']}</td><td>{html.escape(dec_of.get(c['freq_hz'], ''))}</td></tr>"
         for c in d["quietest"])
     card_html = ""
     if d["card"]:
@@ -242,9 +252,9 @@ def render_from_data(d: dict, out_path: str, title: str = "lorascan report", slo
                      "<table><thead><tr><th>rank</th><th>candidate</th><th>score</th><th>busy %</th><th>CAD hit %</th><th>decoded</th><th>floor dBm</th><th>P90 dBm</th><th>samples</th></tr></thead><tbody>" + card_rows + "</tbody></table>")
     slot_html = ""
     if slot_hz:
-        slots = slot_view(d["channels"], d.get("cad_rows", []), d.get("decodes", []), slot_hz)
+        slots = slot_view(d["channels"], d.get("cad_rows", []), d.get("decodes", []), slot_hz, exclusions=zones_hz)
         d["slots"] = slots
-        srows = "".join(f"<tr><td>{i+1}</td><td>{w['start_mhz']:.3f}–{w['end_mhz']:.3f}</td><td>{w['n_channels']}</td><td>{w['score']:.3f}</td><td>{w['busy_max']*100:.1f}</td><td>{w['floor_worst']:.0f} (+{w['floor_penalty']:.2f})</td><td>{w['peak_max']:.0f}</td>"
+        srows = "".join(f"<tr{' class=\"excluded\"' if w.get('excluded') else ''}><td>{i+1}</td><td>{w['start_mhz']:.3f}–{w['end_mhz']:.3f}{' (excluded)' if w.get('excluded') else ''}</td><td>{w['n_channels']}</td><td>{w['score']:.3f}</td><td>{w['busy_max']*100:.1f}</td><td>{w['floor_worst']:.0f} (+{w['floor_penalty']:.2f})</td><td>{w['peak_max']:.0f}</td>"
                         f"<td>{w['cad_hit_max']*100:.1f}{(' SF%d' % w['cad_sf_max']) if w['cad_sf_max'] else ''}</td><td>{html.escape(w['decoded'])}</td><td>{html.escape(w['labels'])}</td></tr>" for i, w in enumerate(slots))
         slot_html = (f"<h2>{slot_hz/1000:g} kHz slots, best first</h2><div class=\"note\">worst case of the channels inside each window: score = busiest channel's busy fraction + highest CAD hit rate + decoded frames / 10 + (worst floor − best floor in the band) / 10 dB (lower is better; the floor term keeps a steady carrier from ranking clean).</div>"
                      "<table><thead><tr><th>rank</th><th>window MHz</th><th>ch</th><th>score</th><th>busy max %</th><th>floor worst dBm (penalty)</th><th>peak dBm</th><th>CAD hit max %</th><th>decoded</th><th>who lives here</th></tr></thead><tbody>" + srows + "</tbody></table>")
@@ -253,20 +263,21 @@ def render_from_data(d: dict, out_path: str, title: str = "lorascan report", slo
     fa_note = (f"Reference false-alarm rate {fa['rate']*100:.1f} % from {fa['n_cad']} CADs at SF{fa['sf']} on the quietest channel ({fa['freq_hz']/1e6:.3f} MHz): hit rates near that value are noise, not LoRa." if fa else "")
     page = _PAGE.format(title=html.escape(title), generated=d["generated"], runs=html.escape(runs), calibration=d["calibration"], fa_note=fa_note, source=html.escape(d.get("source", "from database")),
                         bucket_s=bucket_s, quiet_rows=rows, card_html=card_html, slot_html=slot_html, data_json=json.dumps(d).replace("</", "<\\/"), plotly=PLOTLY_URL, plotly_json=json.dumps(PLOTLY_URL),
-                        heat_svg=heatmap_svg(d["heat"], "busy"), band_svg=band_svg(d["channels"]), sf_svg=sfmap_svg(d["sfmap"]), when_svg=when_svg(d["when"]),
+                        heat_svg=heatmap_svg(d["heat"], "busy", exclusions=zones_hz), band_svg=band_svg(d["channels"], exclusions=zones_hz), sf_svg=sfmap_svg(d["sfmap"]), when_svg=when_svg(d["when"]),
+                        excl_note=(("Excluded from recommendations (data still collected): " + ", ".join(f"{lo:.3f}–{hi:.3f} MHz" for lo, hi in d["exclusions"]) + " — band edges / amateur repeater segments; change with --exclude, disable with --no-exclude.") if d["exclusions"] else "No exclusion zones (--no-exclude)."),
                         when_hidden="" if d["span_s"] > 3600 else "hidden", sf_hidden="" if d["sfmap"]["sfs"] else "hidden")
     with open(out_path, "w") as f:
         f.write(page)
     return page
 
 
-def render_report(store, out_path: str, title: str = "lorascan report", run_id=None, bucket_s: int | None = None, rssi_offset_db: float = 0.0, since: float | None = None, slot_hz: int | None = None) -> str:
-    d = build_data(store, run_id, bucket_s, rssi_offset_db, since)
+def render_report(store, out_path: str, title: str = "lorascan report", run_id=None, bucket_s: int | None = None, rssi_offset_db: float = 0.0, since: float | None = None, slot_hz: int | None = None, exclusions=None) -> str:
+    d = build_data(store, run_id, bucket_s, rssi_offset_db, since, exclusions=exclusions)
     d["cad_rows"] = store.cad_summary(run_id, since)
     return render_from_data(d, out_path, title, slot_hz)
 
 
-def render_report_from_share(doc: dict, out_path: str, title: str = "lorascan report", slot_hz: int | None = None) -> str:
-    d = build_data_from_share(doc)
+def render_report_from_share(doc: dict, out_path: str, title: str = "lorascan report", slot_hz: int | None = None, exclusions=None) -> str:
+    d = build_data_from_share(doc, exclusions=exclusions)
     d["cad_rows"] = doc.get("cad", [])
     return render_from_data(d, out_path, title, slot_hz)

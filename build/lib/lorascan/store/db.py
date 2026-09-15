@@ -32,6 +32,9 @@ class Store:
         self.con.execute("PRAGMA journal_mode=WAL")
         self.con.execute("PRAGMA synchronous=NORMAL")   # WAL + NORMAL: no fsync per row (SD-card friendly); durable at checkpoints
         self.con.executescript(SCHEMA)
+        cols = {r[1] for r in self.con.execute("PRAGMA table_info(energy)")}
+        if "dwell_s" not in cols:                                     # databases written before 0.1.16
+            self.con.execute("ALTER TABLE energy ADD COLUMN dwell_s REAL")
         self.con.commit()
 
     def close(self) -> None:
@@ -54,8 +57,8 @@ class Store:
 
     def add_energy(self, run_id: int, r: EnergyRow) -> None:
         self.con.execute(
-            "INSERT INTO energy(run_id, ts, freq_hz, bw_hz, engine, n, hist_json, floor_dbm, p50, p90, peak, busy_frac, discarded) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (run_id, r.ts, r.freq_hz, r.bw_hz, r.engine, r.n, json.dumps(r.hist), r.floor_dbm, r.p50, r.p90, r.peak, r.busy_frac, r.discarded))
+            "INSERT INTO energy(run_id, ts, freq_hz, bw_hz, engine, n, hist_json, floor_dbm, p50, p90, peak, busy_frac, discarded, dwell_s) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (run_id, r.ts, r.freq_hz, r.bw_hz, r.engine, r.n, json.dumps(r.hist), r.floor_dbm, r.p50, r.p90, r.peak, r.busy_frac, r.discarded, r.dwell_s))
         self.con.commit()
 
     def _where(self, run_id, since):
@@ -68,9 +71,9 @@ class Store:
 
     def iter_energy(self, run_id: int | None = None, since: float | None = None) -> Iterator[EnergyRow]:
         w, a = self._where(run_id, since)
-        for row in self.con.execute("SELECT ts, freq_hz, bw_hz, engine, n, hist_json, floor_dbm, p50, p90, peak, busy_frac, discarded FROM energy" + w + " ORDER BY ts", a):
-            ts, f, bw, eng, n, hj, fl, p50, p90, pk, bf, d = row
-            yield EnergyRow(ts=ts, freq_hz=f, bw_hz=bw, engine=eng, n=n, hist=json.loads(hj), floor_dbm=fl, p50=p50, p90=p90, peak=pk, busy_frac=bf, discarded=d)
+        for row in self.con.execute("SELECT ts, freq_hz, bw_hz, engine, n, hist_json, floor_dbm, p50, p90, peak, busy_frac, discarded, dwell_s FROM energy" + w + " ORDER BY ts", a):
+            ts, f, bw, eng, n, hj, fl, p50, p90, pk, bf, d, dw = row
+            yield EnergyRow(ts=ts, freq_hz=f, bw_hz=bw, engine=eng, n=n, hist=json.loads(hj), floor_dbm=fl, p50=p50, p90=p90, peak=pk, busy_frac=bf, discarded=d, dwell_s=dw)
 
     def channel_summary(self, run_id: int | None = None, since: float | None = None) -> list[dict]:
         """Per frequency: median floor, median p90, max peak, mean busy fraction, row count, seconds observed."""

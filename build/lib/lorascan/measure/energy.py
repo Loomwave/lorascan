@@ -23,6 +23,7 @@ class EnergyRow:
     peak: float = 0.0
     busy_frac: float = 0.0
     discarded: int = 0
+    dwell_s: float | None = None      # seconds the radio listened for this row (None on rows written before 0.1.16)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -81,4 +82,4 @@ def polled_energy(radio, freq_hz: int, bw_khz: int, dwell_s: float, clock=time.m
     radio.standby()
     st = stats(samples, busy_t_db)
     return EnergyRow(ts=ts if ts is not None else time.time(), freq_hz=freq_hz, bw_hz=bw_khz * 1000,
-                     engine="poll", n=len(samples), hist=hist33(samples, offset_dbm), discarded=discarded, **st)
+                     engine="poll", n=len(samples), hist=hist33(samples, offset_dbm), discarded=discarded, dwell_s=dwell_s, **st)

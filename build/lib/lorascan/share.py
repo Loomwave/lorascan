@@ -59,7 +59,9 @@ def build_share(store, cell: tuple[float, float] | None, token: str, profile_nam
     when_acc: dict[tuple, list] = {}
     for r in store.iter_energy(run_id):
         k = (r.freq_hz, r.bw_hz, _bucket(r.ts, granularity))
-        d = acc.setdefault(k, {"freq_hz": r.freq_hz, "bw_hz": r.bw_hz, "bucket": k[2], "floors": [], "p90s": [], "busy": [], "n_rows": 0, "n_samples": 0, "peak": -999.0})
+        d = acc.setdefault(k, {"freq_hz": r.freq_hz, "bw_hz": r.bw_hz, "bucket": k[2], "floors": [], "p90s": [], "busy": [], "n_rows": 0, "n_samples": 0, "peak": -999.0, "secs": 0.0})
+        # listening time: the stored dwell, else an estimate by engine (scan = 8.2 us/sample, poll = ~0.7 ms/sample)
+        d["secs"] += r.dwell_s if r.dwell_s is not None else r.n * (8.2e-6 if r.engine == "scan" else 0.0007)
         if granularity == "day":
             t = dt.datetime.fromtimestamp(r.ts, dt.timezone.utc)
             w = when_acc.setdefault((t.weekday(), t.hour), [0.0, 0]); w[0] += r.busy_frac; w[1] += 1
@@ -69,7 +71,7 @@ def build_share(store, cell: tuple[float, float] | None, token: str, profile_nam
     for k in sorted(acc):
         d = acc[k]; fl = sorted(d["floors"]); p9 = sorted(d["p90s"])
         energy.append({"freq_hz": d["freq_hz"], "bw_hz": d["bw_hz"], "bucket": d["bucket"], "bucket_s": GRANULARITY_S[granularity], "n_rows": d["n_rows"], "n_samples": d["n_samples"],
-                       "hours": round(d["n_samples"] * 8.2e-6 / 3600, 4),
+                       "hours": round(d["secs"] / 3600, 6),
                        "floor_p10_med": fl[len(fl) // 2], "p90_med": p9[len(p9) // 2], "peak_max": d["peak"], "busy_mean": round(sum(d["busy"]) / len(d["busy"]), 4)})
     cad = [{"freq_hz": c["freq_hz"], "bw_hz": c["bw_hz"], "sf": c["sf"], "n_cad": c["n_cad"], "hits": c["hits"], "hit_rate": round(c["hit_rate"], 4), "longest_run": c["longest_run"]}
            for c in store.cad_summary(run_id)] if "cad" in tables else []

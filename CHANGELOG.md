@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.18 — 2026-09-15
+- Hotfix: 0.1.17's report and map page used a Python 3.12-only f-string form and failed with `SyntaxError` on Python 3.11 (Debian 12). Fixed, plus a test that compiles the package under python3.11 when present and a static check for the 3.12-only pattern. Install 0.1.18 instead of 0.1.17.
+
 ## 0.1.17 — 2026-09-15
 - Exclusion zones (Loomwave/lorascan#9, pinztrek): 902.000–903.250 and 926.750–928.000 MHz (band edges + 33 cm repeater segments) are measured but never recommended — quietest channels, the slot ranking and the candidate card list viable channels first and strike excluded ones through; the heat map, band summary (static SVG and plotly) and the community map page hatch the zones. `--exclude a-b,c-d` (MHz) overrides, `--no-exclude` disables. `map.json` and the report JSON carry `exclusions`; slot CSV gains an `excluded` column.
 
