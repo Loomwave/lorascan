@@ -34,7 +34,7 @@ def auto_bucket_s(span_s: float, max_cols: int = 600) -> int:
     return 3600
 
 
-def build_data(store, run_id=None, bucket_s: int | None = 60, rssi_offset_db: float = 0.0, since: float | None = None, exclusions=None) -> dict:
+def build_data(store, run_id=None, bucket_s: int | None = 60, rssi_offset_db: float = 0.0, since: float | None = None, exclusions=None, recommend_bw: int = 500_000) -> dict:
     exclusions = list(DEFAULT_EXCLUSIONS) if exclusions is None else list(exclusions)
     if not bucket_s:
         rs = [r for r in store.runs() if (run_id is None or r["id"] == run_id) and r["first_ts"]]
@@ -108,7 +108,7 @@ def build_data(store, run_id=None, bucket_s: int | None = 60, rssi_offset_db: fl
         except ValueError:
             fa = None
     by_bw = store.channel_summary_by_bw(run_id, since)
-    slot_recommend = recommend_slots(by_bw, cads, decs, 500_000, exclusions)
+    slot_recommend = recommend_slots(by_bw, cads, decs, recommend_bw, exclusions)
     return {
         "slot_recommend": slot_recommend,
         "cad_false_alarm": fa,
@@ -177,7 +177,7 @@ NOTE.textContent='interactive charts: plotly.js '+Plotly.version+' (hover for va
 """
 
 
-def build_data_from_share(doc: dict, exclusions=None) -> dict:
+def build_data_from_share(doc: dict, exclusions=None, recommend_bw: int = 500_000) -> dict:
     exclusions = list(DEFAULT_EXCLUSIONS) if exclusions is None else list(exclusions)
     """The report's data dict from a share document alone (Loomwave/lorascan#3): heat map at the share's
     granularity, per-channel summary as medians over its buckets, SF map from cad rows, when-matrix from
@@ -239,7 +239,7 @@ def build_data_from_share(doc: dict, exclusions=None) -> dict:
          "when": when, "span_s": span, "exclusions": zones_mhz(exclusions), "exclusions_hz": [list(z) for z in exclusions],
          "quietest": [{k: c[k] for k in ("freq_hz", "mhz", "label", "busy_mean", "floor_med", "p90_med", "peak_max", "n_rows", "excluded")} for c in quietest(chans, 10)],
          "source": f"from share document ({doc.get('tool', '?')}, {doc.get('board', '?')}, submitter {str(doc.get('submitter', ''))[:8]}…, granularity {gran}, cell {doc.get('cell')})"}
-    d["slot_recommend"] = recommend_slots(by_bw, cads, decs, 500_000, exclusions)
+    d["slot_recommend"] = recommend_slots(by_bw, cads, decs, recommend_bw, exclusions)
     return d
 
 
@@ -321,12 +321,12 @@ def render_from_data(d: dict, out_path: str, title: str = "lorascan report", slo
 
 
 def render_report(store, out_path: str, title: str = "lorascan report", run_id=None, bucket_s: int | None = None, rssi_offset_db: float = 0.0, since: float | None = None, slot_hz: int | None = None, exclusions=None, recommend_bw: int = 500_000) -> str:
-    d = build_data(store, run_id, bucket_s, rssi_offset_db, since, exclusions=exclusions)
+    d = build_data(store, run_id, bucket_s, rssi_offset_db, since, exclusions=exclusions, recommend_bw=recommend_bw)
     d["cad_rows"] = store.cad_summary(run_id, since)
     return render_from_data(d, out_path, title, slot_hz, recommend_bw)
 
 
 def render_report_from_share(doc: dict, out_path: str, title: str = "lorascan report", slot_hz: int | None = None, exclusions=None, recommend_bw: int = 500_000) -> str:
-    d = build_data_from_share(doc, exclusions=exclusions)
+    d = build_data_from_share(doc, exclusions=exclusions, recommend_bw=recommend_bw)
     d["cad_rows"] = doc.get("cad", [])
     return render_from_data(d, out_path, title, slot_hz, recommend_bw)

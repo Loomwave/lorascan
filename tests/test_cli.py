@@ -142,3 +142,18 @@ def test_report_recommend_bw_zero_suppresses(tmp_path, capsys):
     st.add_energy(rid, _e(910_000_000, 500_000, -119.0, 0.02))
     assert cli.main(["report", "--db", db, "--out", str(tmp_path / "r.html"), "--recommend-bw", "0"]) == 0
     assert "best 500 kHz slot" not in capsys.readouterr().out
+
+def test_report_recommend_bw_250_selects_width(tmp_path, capsys):
+    db = str(tmp_path / "s.db"); st = Store(db); rid = st.new_run("survey", "fake", "")
+    st.add_energy(rid, _e(912_000_000, 250_000, -118.0, 0.03))
+    assert cli.main(["report", "--db", db, "--out", str(tmp_path / "r.html"), "--recommend-bw", "250000"]) == 0
+    out = capsys.readouterr().out
+    assert "best 250 kHz slot" in out and "912.00" in out
+
+def test_report_all_windows_excluded_note(tmp_path, capsys):
+    db = str(tmp_path / "s.db"); st = Store(db); rid = st.new_run("survey", "fake", "")
+    st.add_energy(rid, _e(902_500_000, 500_000, -119.0, 0.02))
+    assert cli.main(["report", "--db", db, "--out", str(tmp_path / "r.html")]) == 0
+    out = capsys.readouterr().out
+    assert "every 500 kHz window overlaps an exclusion zone" in out
+    assert "best 500 kHz slot" not in out

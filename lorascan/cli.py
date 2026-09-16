@@ -375,7 +375,7 @@ def cmd_report(a) -> int:
             for p in write_svgs(build_data_from_share(doc, exclusions=zones), a.svg):
                 print(f"[report] wrote {p}")
         if a.recommend_bw:
-            _print_slot_pick(build_data_from_share(doc, exclusions=zones), a.recommend_bw)
+            _print_slot_pick(build_data_from_share(doc, exclusions=zones, recommend_bw=a.recommend_bw), a.recommend_bw)
         return 0
     store = Store(a.db)
     prof_offset = a.rssi_offset
@@ -392,17 +392,21 @@ def cmd_report(a) -> int:
         for p in write_svgs(build_data(store, a.run, a.bucket, prof_offset, since, exclusions=zones), a.svg):
             print(f"[report] wrote {p}")
     if a.recommend_bw:
-        _print_slot_pick(build_data(store, a.run, a.bucket, prof_offset, since, exclusions=zones), a.recommend_bw)
+        _print_slot_pick(build_data(store, a.run, a.bucket, prof_offset, since, exclusions=zones, recommend_bw=a.recommend_bw), a.recommend_bw)
     return 0
 
 
 def _print_slot_pick(d: dict, recommend_bw: int) -> None:
     sr = d.get("slot_recommend") or {}
+    if sr.get("width_hz") != recommend_bw:
+        return
     wk = recommend_bw // 1000
-    if sr.get("width_hz") == recommend_bw and sr.get("recommended"):
+    if sr.get("recommended"):
         r = sr["recommended"]
         print(f"[report] best {wk} kHz slot: {r['center_mhz']:.2f} MHz ({r['start_mhz']:.2f}-{r['end_mhz']:.2f}) {r['why']}")
-    elif sr.get("width_hz") == recommend_bw:
+    elif sr.get("windows"):
+        print(f"[report] no clear {wk} kHz slot: every {wk} kHz window overlaps an exclusion zone")
+    else:
         print(f"[report] no {wk} kHz-bandwidth data — re-scan with --bw ...,{wk} for a {wk} kHz slot pick", file=sys.stderr)
 
 
