@@ -117,3 +117,10 @@ def test_setup_subcommand_runs_with_injected_wizard(monkeypatch, tmp_path):
     assert rc == 0
     from lorascan import station_config as sc
     assert sc.load(home=str(tmp_path)).profile == "manual"
+
+def test_build_wizard_threads_db_into_state():
+    import types
+    w = cli._build_wizard(types.SimpleNamespace(db="site.db"))
+    assert w.state["db"] == "site.db"
+    w2 = cli._build_wizard(types.SimpleNamespace(db=None))
+    assert not w2.state.get("db")

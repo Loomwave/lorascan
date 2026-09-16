@@ -583,7 +583,6 @@ def cmd_upload(a) -> int:
 
 def _build_wizard(a):
     from . import setup, autoconf, share
-    from .report.ascii import band_graph  # noqa: F401  (used via runner.sweep -> step)
     class _CliRunner(setup.Runner):
         def probe(self, profile):
             prof = _profile(profile) if isinstance(profile, str) else profile
@@ -627,7 +626,10 @@ def _build_wizard(a):
             finally:
                 hal.close()
             return rows
-    return setup.Wizard(setup.TtyIO(), _CliRunner(), home=None)
+    w = setup.Wizard(setup.TtyIO(), _CliRunner(), home=None)
+    if getattr(a, "db", None):
+        w.state["db"] = a.db
+    return w
 
 
 def cmd_setup(a) -> int:
