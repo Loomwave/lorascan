@@ -149,5 +149,10 @@ def test_band_svg_auto_range_shows_busy_legend():
     ]
     s = band_svg(chans, auto_range=True)
     assert "busy 2% → 12%" in s
+    # the legend also carries the colour-scale gradient swatch (its quiet end is busy_colour(0.0));
+    # this guards against the swatch being silently dropped again.
+    assert busy_colour(0.0) in s
     # absolute mode carries no such legend (unchanged per-station report)
-    assert "busy 2% → 12%" not in band_svg(chans, auto_range=False)
+    absolute = band_svg(chans, auto_range=False)
+    assert "busy 2% → 12%" not in absolute
+    assert busy_colour(0.0) not in absolute

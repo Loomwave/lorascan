@@ -223,9 +223,11 @@ def band_svg(channels: list, width: int = 1060, exclusions=None, auto_range: boo
         t += 2
     out.append(_txt(ml + pw / 2, mt + ph + 34, "MHz  (bar = floor to peak, tick = P90, colour = busy fraction)", 11, "middle"))
     if auto_range and vmin is not None:
-        # name the range the colour was mapped to — text only, matching the 500 kHz ribbon's legend, so the
-        # relative colouring stays honest (a viewer sees the band's own low end is the green end of the scale).
-        out.append(_txt(ml, 15, f"busy {vmin * 100:.0f}% → {vmax * 100:.0f}%  · colour auto-ranged", 11, "start", 'font-weight="700"'))
+        # a small colour-scale gradient (quiet→busy) then the range it maps to, laid out left→right so the
+        # swatch never overlaps the text; matches the 500 kHz ribbon so the two figures read the same.
+        for k in range(7):
+            out.append(f'<rect x="{ml + k * 7:.1f}" y="7" width="7" height="8" fill="{busy_colour(k / 6.0)}"/>')
+        out.append(_txt(ml + 56, 15, f"busy {vmin * 100:.0f}% → {vmax * 100:.0f}%  · colour auto-ranged", 11, "start", 'font-weight="700"'))
     out.append("</svg>")
     return "".join(out)
 
@@ -336,7 +338,12 @@ def grid_ribbon_svg(grid: list, width: int = 1060) -> str:
         out.append(f'<line x1="{x:.1f}" y1="{mt + ph}" x2="{x:.1f}" y2="{mt + ph + 4}" stroke="currentColor"/>')
         out.append(_txt(x, mt + ph + 16, str(t), 10, "middle"))
     out.append(_txt(ml + pw / 2, mt + ph + 32, "MHz  (fixed .250/.750 grid; ring = recommended, hatched = excluded)", 11, "middle"))
-    legend = f"busy {vmin * 100:.0f}% → {vmax * 100:.0f}%" if vmin is not None else "no 500 kHz data yet"
-    out.append(_txt(ml, 14, legend, 11, "start"))
+    if vmin is not None:
+        # colour-scale gradient then the busy range, left→right so they never overlap (matches band_svg)
+        for k in range(7):
+            out.append(f'<rect x="{ml + k * 7:.1f}" y="6" width="7" height="8" fill="{busy_colour(k / 6.0)}"/>')
+        out.append(_txt(ml + 56, 14, f"busy {vmin * 100:.0f}% → {vmax * 100:.0f}%", 11, "start"))
+    else:
+        out.append(_txt(ml, 14, "no 500 kHz data yet", 11, "start"))
     out.append("</svg>")
     return "".join(out)
