@@ -164,6 +164,12 @@ floor at 62/125/250/500 kHz. `--cad-grid 500000` runs a Channel Activity Detecti
 every 500 kHz window once per grid round at each `--sfs` × `--bws` pair, which surfaces every LoRa family
 in the band whatever its sync word. `--slot 500000` then ranks the windows.
 
+The report now **automatically** prints and shows a "Recommended 500 kHz slot" — the best-placed 500 kHz window computed from the true 500 kHz-bandwidth energy, with CAD/decode presence and exclusion zones accounted for — whenever the database has 500 kHz-bandwidth data. `--recommend-bw <hz>` selects the width (default 500000, `0` disables).
+
+```
+lorascan report --db slot.db --out slot.html   # prints: [report] best 500 kHz slot: 903.30 MHz (903.05-903.55) ...
+```
+
 Your own networks: put one preset per line in `~/.config/lorascan/networks.yaml` (or pass `--networks FILE`):
 ```
 # network/preset: {sync, sf, bw (kHz), cr, preamble, crc, iq, freqs (MHz, space separated)}
