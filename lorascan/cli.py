@@ -105,7 +105,11 @@ def _cad_steps(freqs, sfs=(7, 9, 11), bws=(125, 250), dwell_s=0.0):
 
 
 def _run_scan(a, kind: str) -> int:
-    prof = _profile(a.profile)
+    from . import station_config as _sc
+    prof_name = a.profile
+    if prof_name == "generic-spidev":                 # the argparse default = "not chosen"
+        prof_name = _sc.load().profile or prof_name
+    prof = _profile(prof_name)
     store = Store(a.db)
     if prof.bus_type == "fake":
         a.fake_clock = True          # a simulated radio never sleeps; drive its time from a fake clock
@@ -434,10 +438,15 @@ def cmd_export(a) -> int:
 
 
 def cmd_share(a) -> int:
+    from . import station_config as _sc
+    _cfg = _sc.load()
+    to = _sc.resolve(a.to, _cfg.endpoint, None)
+    cellarg = a.cell if a.cell is not None else (f"{_cfg.location[0]},{_cfg.location[1]}" if _cfg.location else None)
+    gran = _sc.resolve(getattr(a, "granularity", None), _cfg.granularity, "hour")
     store = Store(a.db)
     cell = None
-    if a.cell:
-        lat, lon = (float(x) for x in a.cell.split(","))
+    if cellarg:
+        lat, lon = (float(x) for x in cellarg.split(","))
         cell = coarse_cell(lat, lon, a.cell_size)
     runs = store.runs()
     profile_name = runs[-1]["profile"] if runs else "unknown"
@@ -450,14 +459,14 @@ def cmd_share(a) -> int:
         doc, size = choose_by_budget(store, cell, token, profile_name, parse_budget(a.budget), offset, a.cell_size, a.run)
         print(f"[share] budget {a.budget}: chose granularity={doc['granularity']} tables={'energy' + (',cad,decode' if doc['cad'] or doc['decode'] else '')} ({size} bytes gzipped for the whole span)")
     else:
-        doc = build_share(store, cell, token, profile_name, offset, a.cell_size, a.run, granularity=a.granularity)
+        doc = build_share(store, cell, token, profile_name, offset, a.cell_size, a.run, granularity=gran)
     write_share(doc, a.out)
     print(f"[share] wrote {a.out}: {len(doc['energy'])} energy aggregates ({doc['granularity']}), {len(doc['cad'])} CAD rows, {len(doc['decode'])} decode rows, cell={doc['cell']}; {len(gzip_bytes(doc))} bytes gzipped")
-    if a.dry_run or not a.to:
+    if a.dry_run or not to:
         if not a.dry_run:
             print("[share] no --to given: nothing uploaded; send the file later with `lorascan upload FILE --to URL`", file=sys.stderr)
         return 0
-    return _upload(doc, a.to)
+    return _upload(doc, to)
 
 
 def _upload(doc: dict, to: str) -> int:
@@ -561,11 +570,15 @@ def cmd_syncfind(a) -> int:
 
 def cmd_upload(a) -> int:
     """Store-and-forward: upload a share file written earlier, from any machine (the submitter token is inside)."""
+    from . import station_config as _sc
+    to = _sc.resolve(a.to, _sc.load().endpoint, None)
+    if not to:
+        raise ValueError("no endpoint: pass --to or run `lorascan setup`")
     with open(a.file) as f:
         doc = json.load(f)
     if doc.get("format") != SHARE_FORMAT:
         raise ValueError(f"{a.file}: format {doc.get('format')!r}, this lorascan sends {SHARE_FORMAT}")
-    return _upload(doc, a.to)
+    return _upload(doc, to)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -651,7 +664,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--cr", type=int, default=5); sp.add_argument("--preamble", type=int, default=8); sp.add_argument("--syncs", default=None, help="e.g. 0x12,0x34 or 0x00-0x7F (default all 256)")
     sp.add_argument("--sync-dwell", type=float, default=1.0, help="seconds per sync word"); sp.add_argument("--verbose", "-v", action="store_true"); sp.set_defaults(fn=cmd_syncfind)
     sp = sub.add_parser("upload", help="upload a share file written earlier (store-and-forward from any machine)")
-    sp.add_argument("file"); sp.add_argument("--to", required=True); sp.set_defaults(fn=cmd_upload)
+    sp.add_argument("file"); sp.add_argument("--to", default=None, help="upload endpoint (default: the station config's share endpoint)"); sp.set_defaults(fn=cmd_upload)
     return p
 
 

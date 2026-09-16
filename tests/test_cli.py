@@ -1,5 +1,5 @@
 import os
-from lorascan import cli
+from lorascan import cli, station_config as sc
 from lorascan.store.db import Store
 
 def test_scan_quick_with_fake_profile_writes_rows_and_report(tmp_path, capsys):
@@ -35,3 +35,41 @@ def test_engine_scan_falls_back_to_poll_on_the_fake_radio(tmp_path, capsys):
     assert rc == 0 and "falling back to the polled engine" in err
     rows = list(Store(db).iter_energy())
     assert rows and all(r.engine == "poll" for r in rows) and len(rows) == 144 - 2
+
+def _write_cfg(tmp_path, **kw):
+    home = tmp_path / "home"; (home / ".config" / "lorascan").mkdir(parents=True)
+    sc.save(sc.StationConfig(**kw), path=str(home / ".config" / "lorascan" / "config.yaml"))
+    return str(home)
+
+def test_share_uses_config_endpoint_when_no_flag(tmp_path, monkeypatch, capsys):
+    home = _write_cfg(tmp_path, endpoint="https://cfg.example", granularity="day")
+    monkeypatch.setenv("HOME", home)
+    sent = {}
+    monkeypatch.setattr("lorascan.cli.upload_share", lambda doc, to, **k: sent.update(to=to) or
+                        {"sent": 0, "skipped": 0, "bytes": 0, "attempts": 1, "watermark": None, "accepted": 0})
+    # a tiny db with one run so build_share has something; reuse the helper the other cli tests use
+    db = str(tmp_path / "s.db")
+    cli.main(["scan", "quick", "--profile", "fake", "--db", db, "--passes", "1",
+              "--dwell", "0.005", "--sample-gap", "0.001"])
+    cli.main(["share", "--db", db, "--out", str(tmp_path / "s.json")])
+    assert sent.get("to") == "https://cfg.example"
+
+def test_explicit_flag_beats_config(tmp_path, monkeypatch):
+    home = _write_cfg(tmp_path, endpoint="https://cfg.example")
+    monkeypatch.setenv("HOME", home)
+    sent = {}
+    monkeypatch.setattr("lorascan.cli.upload_share", lambda doc, to, **k: sent.update(to=to) or
+                        {"sent": 0, "skipped": 0, "bytes": 0, "attempts": 1, "watermark": None, "accepted": 0})
+    db = str(tmp_path / "s.db")
+    cli.main(["scan", "quick", "--profile", "fake", "--db", db, "--passes", "1",
+              "--dwell", "0.005", "--sample-gap", "0.001"])
+    cli.main(["share", "--db", db, "--out", str(tmp_path / "s.json"), "--to", "https://flag.example"])
+    assert sent.get("to") == "https://flag.example"
+
+def test_no_config_behaves_as_today(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "empty"))
+    db = str(tmp_path / "s.db")
+    cli.main(["scan", "quick", "--profile", "fake", "--db", db, "--passes", "1",
+              "--dwell", "0.005", "--sample-gap", "0.001"])
+    rc = cli.main(["share", "--db", db, "--out", str(tmp_path / "s.json")])  # no --to, no cfg
+    assert rc == 0  # writes the file, uploads nothing, unchanged
