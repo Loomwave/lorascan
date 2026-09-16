@@ -369,11 +369,13 @@ def cmd_report(a) -> int:
     if a.from_share:
         with open(a.from_share) as f:
             doc = json.load(f)
-        render_report_from_share(doc, a.out, title=a.title, slot_hz=a.slot, exclusions=zones)
+        render_report_from_share(doc, a.out, title=a.title, slot_hz=a.slot, exclusions=zones, recommend_bw=a.recommend_bw)
         print(f"[report] wrote {a.out} from share document {a.from_share}")
         if a.svg:
             for p in write_svgs(build_data_from_share(doc, exclusions=zones), a.svg):
                 print(f"[report] wrote {p}")
+        if a.recommend_bw:
+            _print_slot_pick(build_data_from_share(doc, exclusions=zones, recommend_bw=a.recommend_bw), a.recommend_bw)
         return 0
     store = Store(a.db)
     prof_offset = a.rssi_offset
@@ -384,12 +386,28 @@ def cmd_report(a) -> int:
         except FileNotFoundError:
             prof_offset = 0.0
     since = (time.time() - _duration(a.since)) if a.since else None
-    render_report(store, a.out, title=a.title, run_id=a.run, bucket_s=a.bucket, rssi_offset_db=prof_offset, since=since, slot_hz=a.slot, exclusions=zones)
+    render_report(store, a.out, title=a.title, run_id=a.run, bucket_s=a.bucket, rssi_offset_db=prof_offset, since=since, slot_hz=a.slot, exclusions=zones, recommend_bw=a.recommend_bw)
     print(f"[report] wrote {a.out}")
     if a.svg:
         for p in write_svgs(build_data(store, a.run, a.bucket, prof_offset, since, exclusions=zones), a.svg):
             print(f"[report] wrote {p}")
+    if a.recommend_bw:
+        _print_slot_pick(build_data(store, a.run, a.bucket, prof_offset, since, exclusions=zones, recommend_bw=a.recommend_bw), a.recommend_bw)
     return 0
+
+
+def _print_slot_pick(d: dict, recommend_bw: int) -> None:
+    sr = d.get("slot_recommend") or {}
+    if sr.get("width_hz") != recommend_bw:
+        return
+    wk = recommend_bw // 1000
+    if sr.get("recommended"):
+        r = sr["recommended"]
+        print(f"[report] best {wk} kHz slot: {r['center_mhz']:.2f} MHz ({r['start_mhz']:.2f}-{r['end_mhz']:.2f}) {r['why']}")
+    elif sr.get("windows"):
+        print(f"[report] no clear {wk} kHz slot: every {wk} kHz window overlaps an exclusion zone")
+    else:
+        print(f"[report] no {wk} kHz-bandwidth data — re-scan with --bw ...,{wk} for a {wk} kHz slot pick", file=sys.stderr)
 
 
 def cmd_export(a) -> int:
@@ -693,7 +711,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--exclude", default=None, help="MHz zones measured but never recommended, e.g. 902.0-903.25,926.75-928.0 (the default: band edges + 33 cm repeater segments)")
     sp.add_argument("--no-exclude", action="store_true", help="recommend any channel, including band edges and repeater segments")
     sp.add_argument("--svg", default=None, help="also write standalone heatmap.svg / band.svg / sfmap.svg / when.svg into this directory")
-    sp.add_argument("--from-share", default=None, help="render from a share document (lorascan share output) instead of a database"); sp.set_defaults(fn=cmd_report)
+    sp.add_argument("--from-share", default=None, help="render from a share document (lorascan share output) instead of a database")
+    sp.add_argument("--recommend-bw", type=int, default=500_000, help="print/show the best slot at this bandwidth in Hz (0 disables)")
+    sp.set_defaults(fn=cmd_report)
     sp = sub.add_parser("export", help="CSV: energy to --csv, CAD to <stem>-cad.csv, decodes to <stem>-decode.csv (or one table with --table)"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--csv", required=True); sp.add_argument("--run", type=int, default=None)
     sp.add_argument("--table", choices=("all", "energy", "cad", "decode", "slots"), default="all", help="one table to --csv exactly, or all (default); slots = the N kHz window view")
     sp.add_argument("--slot", type=int, default=None, help="window width Hz for --table slots (default 500000)")

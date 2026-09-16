@@ -2,6 +2,7 @@ import json
 import os
 from lorascan import cli, station_config as sc
 from lorascan.store.db import Store
+from lorascan.measure.energy import EnergyRow
 
 def test_scan_quick_with_fake_profile_writes_rows_and_report(tmp_path, capsys):
     db = str(tmp_path / "s.db")
@@ -124,3 +125,35 @@ def test_build_wizard_threads_db_into_state():
     assert w.state["db"] == "site.db"
     w2 = cli._build_wizard(types.SimpleNamespace(db=None))
     assert not w2.state.get("db")
+
+def _e(freq, bw, floor, busy):
+    return EnergyRow(ts=1.0, freq_hz=freq, bw_hz=bw, engine="poll", n=10, hist=[0] * 10, floor_dbm=floor,
+                      p50=floor + 5, p90=floor + 10, peak=floor + 30, busy_frac=busy, discarded=0, dwell_s=1.0)
+
+def test_report_prints_best_slot(tmp_path, capsys):
+    db = str(tmp_path / "s.db"); st = Store(db); rid = st.new_run("survey", "fake", "")
+    st.add_energy(rid, _e(910_000_000, 500_000, -119.0, 0.02))
+    assert cli.main(["report", "--db", db, "--out", str(tmp_path / "r.html")]) == 0
+    out = capsys.readouterr().out
+    assert "best 500 kHz slot" in out and "910.00" in out
+
+def test_report_recommend_bw_zero_suppresses(tmp_path, capsys):
+    db = str(tmp_path / "s.db"); st = Store(db); rid = st.new_run("survey", "fake", "")
+    st.add_energy(rid, _e(910_000_000, 500_000, -119.0, 0.02))
+    assert cli.main(["report", "--db", db, "--out", str(tmp_path / "r.html"), "--recommend-bw", "0"]) == 0
+    assert "best 500 kHz slot" not in capsys.readouterr().out
+
+def test_report_recommend_bw_250_selects_width(tmp_path, capsys):
+    db = str(tmp_path / "s.db"); st = Store(db); rid = st.new_run("survey", "fake", "")
+    st.add_energy(rid, _e(912_000_000, 250_000, -118.0, 0.03))
+    assert cli.main(["report", "--db", db, "--out", str(tmp_path / "r.html"), "--recommend-bw", "250000"]) == 0
+    out = capsys.readouterr().out
+    assert "best 250 kHz slot" in out and "912.00" in out
+
+def test_report_all_windows_excluded_note(tmp_path, capsys):
+    db = str(tmp_path / "s.db"); st = Store(db); rid = st.new_run("survey", "fake", "")
+    st.add_energy(rid, _e(902_500_000, 500_000, -119.0, 0.02))
+    assert cli.main(["report", "--db", db, "--out", str(tmp_path / "r.html")]) == 0
+    out = capsys.readouterr().out
+    assert "every 500 kHz window overlaps an exclusion zone" in out
+    assert "best 500 kHz slot" not in out

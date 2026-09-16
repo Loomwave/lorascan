@@ -1,7 +1,7 @@
 import json, re
 from lorascan.store.db import Store
 from lorascan.measure.energy import EnergyRow
-from lorascan.report.html import render_report, quietest
+from lorascan.report.html import render_report, quietest, build_data, render_from_data
 
 def fill(s, rid, offset_hours=0.0):
     t0 = 1_700_000_000.0
@@ -33,3 +33,36 @@ def test_quietest_ranks_by_busy_then_floor():
              {"freq_hz": 902_000_000, "busy_mean": 0.0, "floor_med": -110.0, "p90_med": -108.0, "peak_max": -105.0},
              {"freq_hz": 921_000_000, "busy_mean": 0.0, "floor_med": -113.0, "p90_med": -110.0, "peak_max": -106.0}]
     assert [c["freq_hz"] for c in quietest(chans, 2)] == [921_000_000, 902_000_000]
+
+
+def _e(freq, bw, floor, busy):
+    return EnergyRow(ts=1.0, freq_hz=freq, bw_hz=bw, engine="poll", n=10, hist=[0]*10, floor_dbm=floor,
+                     p50=floor+5, p90=floor+10, peak=floor+30, busy_frac=busy, discarded=0, dwell_s=1.0)
+
+
+def test_build_data_has_slot_recommend(tmp_path):
+    st = Store(str(tmp_path/"s.db")); rid = st.new_run("survey", "fake", "")
+    st.add_energy(rid, _e(910_000_000, 500_000, -119.0, 0.02))
+    st.add_energy(rid, _e(921_000_000, 500_000, -110.0, 0.50))
+    d = build_data(st, bucket_s=0)
+    assert d["slot_recommend"]["recommended"]["center_hz"] == 910_000_000
+
+
+def test_render_shows_recommendation_section(tmp_path):
+    st = Store(str(tmp_path/"s.db")); rid = st.new_run("survey", "fake", "")
+    st.add_energy(rid, _e(910_000_000, 500_000, -119.0, 0.02))
+    d = build_data(st, bucket_s=0)
+    out = tmp_path/"r.html"
+    render_from_data(d, str(out))
+    html = open(str(out)).read()
+    assert "Recommended 500 kHz slot" in html and "910.00" in html
+
+
+def test_render_note_when_no_500k_data(tmp_path):
+    st = Store(str(tmp_path/"s.db")); rid = st.new_run("survey", "fake", "")
+    st.add_energy(rid, _e(915_000_000, 125_000, -110.0, 0.1))
+    d = build_data(st, bucket_s=0)
+    out = tmp_path/"r.html"
+    render_from_data(d, str(out))
+    html = open(str(out)).read()
+    assert "--bw" in html  # the "re-scan with --bw ...,500" note
