@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.1.23 — 2026-09-16
+- Grid-aligned 500 kHz recommendation: `lorascan report --recommend-grid` ranks the fixed `.250/.750` grid of 52 non-overlapping 500 kHz channels (902.25, 902.75, … 927.75 MHz) — the coordination grid MeshCore-500 deployments share so neighbours interoperate — instead of a free window. Each grid channel is scored worst-case from the true 500 kHz-bandwidth energy that falls in it (reusing the v0.1.21 scoring), with exclusion-zone channels struck. Without the flag the free-grid recommendation is unchanged. New `report/slot_recommend.recommend_grid_slots` / `grid_centers`.
 ## 0.1.22 — 2026-09-16
 - Community share server: bulk data-dump endpoints. `GET /v1/dump.json` returns every unflagged per-(submitter, freq, bandwidth) aggregate row — including `bw_hz`, which the map summary blends away — plus submitter metadata; `GET /v1/dump.csv` is the same rows as CSV. Lets the community and researchers pull the raw fleet aggregates for their own analysis (e.g. bandwidth-specific / 500 kHz slot studies). Flagged (miscalibrated) uploads are excluded, matching the public map.
 

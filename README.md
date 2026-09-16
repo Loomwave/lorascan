@@ -166,6 +166,8 @@ in the band whatever its sync word. `--slot 500000` then ranks the windows.
 
 The report now **automatically** prints and shows a "Recommended 500 kHz slot" — the best-placed 500 kHz window computed from the true 500 kHz-bandwidth energy, with CAD/decode presence and exclusion zones accounted for — whenever the database has 500 kHz-bandwidth data. `--recommend-bw <hz>` selects the width (default 500000, `0` disables).
 
+For a deployment that must **coordinate on a shared channel** (e.g. MeshCore 500), add `--recommend-grid`: the pick is then aligned to the fixed `.250/.750` grid of 52 non-overlapping 500 kHz channels (902.25, 902.75, … 927.75 MHz) instead of a free window, so neighbours land on the same channel. Channels overlapping an exclusion zone (including the 902.25/902.75 band-edge pair) are struck, so the recommendation is the cleanest *usable* grid channel.
+
 ```
 lorascan report --db slot.db --out slot.html   # prints: [report] best 500 kHz slot: 903.30 MHz (903.05-903.55) ...
 ```

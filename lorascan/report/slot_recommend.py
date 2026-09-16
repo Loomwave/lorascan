@@ -54,6 +54,61 @@ def recommend_slots(by_bw, cad, decodes, width_hz: int = 500_000, exclusions=Non
     return {"width_hz": width_hz, "recommended": recommended, "windows": windows}
 
 
+def grid_centers(width_hz: int = 500_000, base_hz: int = 902_250_000,
+                  band: tuple[int, int] = (902_000_000, 928_000_000)) -> list[int]:
+    """The fixed MeshCore-500 .250/.750 grid: base_hz + n*width_hz for n=0,1,... while each window stays
+    inside band. Stops at the first n whose window pokes past a band edge."""
+    half = width_hz // 2
+    centers = []
+    n = 0
+    while True:
+        center = base_hz + n * width_hz
+        if not (center - half >= band[0] and center + half <= band[1]):
+            break
+        centers.append(center)
+        n += 1
+    return centers
+
+
+def grid_width_rows(by_bw, centers, width_hz: int = 500_000) -> list[dict]:
+    """One synthetic width-W row per grid center that has real width-W data in its window, worst-case
+    aggregated across the in-window rows so a channel is only as good as its worst measured sub-point.
+    Centers with no in-window width-W data are omitted."""
+    half = width_hz // 2
+    width_rows = [c for c in by_bw if c["bw_hz"] == width_hz]
+    out = []
+    for center in centers:
+        start, end = center - half, center + half
+        in_window = [c for c in width_rows if _in_window(c["freq_hz"], start, end)]
+        if not in_window:
+            continue
+        out.append({
+            "freq_hz": center,
+            "bw_hz": width_hz,
+            "busy_mean": max(c.get("busy_mean", 0) for c in in_window),
+            "floor_med": max(c.get("floor_med", 0) for c in in_window),
+            "p90_med": max(c.get("p90_med", 0) for c in in_window),
+            "peak_max": max(c.get("peak_max", 0) for c in in_window),
+            "n_rows": sum(c.get("n_rows", 0) for c in in_window),
+            "n_samples": sum(c.get("n_samples", 0) for c in in_window),
+        })
+    return out
+
+
+def recommend_grid_slots(by_bw, cad, decodes, width_hz: int = 500_000, exclusions=None,
+                          base_hz: int = 902_250_000) -> dict:
+    """Grid-aligned variant of recommend_slots: rank the fixed .250/.750 MeshCore-500 channels instead of
+    a free grid of windows, by feeding recommend_slots synthetic per-grid-center rows built from the real
+    scan data. Reuses recommend_slots' scoring/sorting/exclusion logic unchanged."""
+    centers = grid_centers(width_hz, base_hz)
+    synth = grid_width_rows(by_bw, centers, width_hz)
+    narrow_rows = [c for c in by_bw if c["bw_hz"] != width_hz]
+    result = recommend_slots(synth + narrow_rows, cad, decodes, width_hz, exclusions)
+    result["grid"] = True
+    result["base_hz"] = base_hz
+    return result
+
+
 def _why(wr, cad_hit_max, frames, carrier_pen, narrow_by_freq, excluded) -> str:
     if excluded:
         return "overlaps an exclusion zone"

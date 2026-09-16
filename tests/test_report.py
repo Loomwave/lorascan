@@ -66,3 +66,26 @@ def test_render_note_when_no_500k_data(tmp_path):
     render_from_data(d, str(out))
     html = open(str(out)).read()
     assert "--bw" in html  # the "re-scan with --bw ...,500" note
+
+
+def test_render_shows_grid_recommendation_header(tmp_path):
+    st = Store(str(tmp_path/"s.db")); rid = st.new_run("survey", "fake", "")
+    st.add_energy(rid, _e(910_250_000, 500_000, -119.0, 0.02))
+    d = build_data(st, bucket_s=0, recommend_grid=True)
+    assert d["slot_recommend"]["grid"] is True
+    out = tmp_path/"r.html"
+    render_from_data(d, str(out))
+    html = open(str(out)).read()
+    assert "Recommended 500 kHz slot (MeshCore-500 .250/.750 grid)" in html
+    assert "coordination grid" in html and "902.25, 902.75" in html
+
+
+def test_render_without_grid_keeps_plain_header(tmp_path):
+    st = Store(str(tmp_path/"s.db")); rid = st.new_run("survey", "fake", "")
+    st.add_energy(rid, _e(910_000_000, 500_000, -119.0, 0.02))
+    d = build_data(st, bucket_s=0)
+    out = tmp_path/"r.html"
+    render_from_data(d, str(out))
+    html = open(str(out)).read()
+    assert "Recommended 500 kHz slot</h2>" in html
+    assert "MeshCore-500" not in html
