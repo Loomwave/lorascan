@@ -193,6 +193,7 @@ def step_upload(w) -> StepResult:
     h = w.runner.endpoint_health(endpoint)
     if not h.get("ok"):
         w.io.say(f"  endpoint not reachable: {h.get('error') or h.get('status')}")
+        w.state["endpoint"] = endpoint
         return StepResult(True, "endpoint saved but not verified; you can upload later with `lorascan upload`.")
     w.state["endpoint"] = endpoint
     w.state.setdefault("granularity", "hour")

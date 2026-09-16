@@ -67,6 +67,14 @@ def test_upload_verifies_and_sets_endpoint():
     res = setup.step_upload(w)
     assert res.ok and w.state["endpoint"].startswith("https://")
 
+def test_upload_saves_endpoint_even_when_unreachable():
+    class R(setup.Runner):
+        def endpoint_health(self, url): return {"ok": False, "error": "offline in test"}
+    io = setup.ScriptedIO([""])               # accept default endpoint
+    w = setup.Wizard(io, R(), home="/tmp")
+    res = setup.step_upload(w)
+    assert res.ok and w.state["endpoint"] == "https://share.lorascan.app"
+
 def test_firstlight_draws_graph_from_sweep():
     class R(setup.Runner):
         def sweep(self, p): return [(915_000_000, -50), (920_000_000, -70)]
