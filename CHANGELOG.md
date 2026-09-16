@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.22 — 2026-09-16
+- Community share server: bulk data-dump endpoints. `GET /v1/dump.json` returns every unflagged per-(submitter, freq, bandwidth) aggregate row — including `bw_hz`, which the map summary blends away — plus submitter metadata; `GET /v1/dump.csv` is the same rows as CSV. Lets the community and researchers pull the raw fleet aggregates for their own analysis (e.g. bandwidth-specific / 500 kHz slot studies). Flagged (miscalibrated) uploads are excluded, matching the public map.
+
 ## 0.1.21 — 2026-09-16
 - Best 500 kHz slot recommendation: `lorascan report` now automatically prints and shows a "Recommended 500 kHz slot" — the best-placed 500 kHz window computed from the true 500 kHz-bandwidth energy (not the blended per-channel summary), accounting for CAD/decode presence, a narrowband-carrier floor penalty, and the exclusion zones — whenever the database holds 500 kHz-bandwidth data (`scan … --bw …,500`). The report leads with the pick and lists the top candidate windows, struck where they overlap an exclusion zone; the terminal prints a one-line `[report] best 500 kHz slot: …`. `--recommend-bw <hz>` selects the width (default 500000, `0` disables), so the same ranking serves 250 kHz etc. Adds `Store.channel_summary_by_bw` (per-(freq,bw) unblended summary) and a pure `report/slot_recommend` ranking module. The existing `--slot N` view is unchanged.
 
