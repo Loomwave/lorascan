@@ -281,12 +281,19 @@ def when_svg(when: list, width: int = 700) -> str:
 _AXIS_TICKS_MHZ = (902, 906, 910, 914, 918, 922, 926, 928)
 
 
-def grid_ribbon_svg(grid: list, width: int = 1060, exclusions=None) -> str:
+_GRID_EXCL_DEFS = '<defs><pattern id="gridexclhatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="currentColor" stroke-opacity="0.35" stroke-width="3"/></pattern></defs>'
+
+
+def grid_ribbon_svg(grid: list, width: int = 1060) -> str:
     """Best-500-kHz-slot ribbon: one horizontal band across 902-928 MHz, one segment per fixed
     .250/.750 MeshCore-500 grid channel. Colour auto-ranges to the min/max busy fraction actually
     measured (vs. the absolute 0..1 mapping, which flattens every bar to the same pale colour on a
-    quiet band). No-data channels get a faint neutral fill; excluded channels are hatched; the
-    recommended channel gets an outline ring and a small label. Static SVG, no JavaScript."""
+    quiet band). No-data channels get a faint neutral fill; excluded channels are hatched (each grid
+    item already carries its own `excluded` flag, so there is no separate exclusions parameter); the
+    recommended channel gets an outline ring and a small label. Static SVG, no JavaScript.
+
+    Uses its own hatch pattern id (#gridexclhatch) rather than band_svg's #exclhatch: both figures can
+    appear on the same page (share_page.py), and duplicate SVG <pattern> ids are invalid HTML."""
     if not grid:
         return ""
     ml, mr, mt, mb = 16, 16, 50, 46
@@ -297,7 +304,7 @@ def grid_ribbon_svg(grid: list, width: int = 1060, exclusions=None) -> str:
     x_of = lambda mhz: ml + (mhz - fmin) / fspan * pw
     data_vals = [g["busy"] for g in grid if g.get("busy") is not None]
     vmin, vmax = (min(data_vals), max(data_vals)) if data_vals else (None, None)
-    out = [f'<svg class="static" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {ph + mt + mb}" width="100%" role="img" aria-label="best 500 kHz slot grid" font-family="system-ui,sans-serif">', _EXCL_DEFS]
+    out = [f'<svg class="static" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {ph + mt + mb}" width="100%" role="img" aria-label="best 500 kHz slot grid" font-family="system-ui,sans-serif">', _GRID_EXCL_DEFS]
     for g in grid:
         c = g["center_mhz"]
         x0, x1 = x_of(c - 0.25), x_of(c + 0.25)
@@ -316,7 +323,7 @@ def grid_ribbon_svg(grid: list, width: int = 1060, exclusions=None) -> str:
         opacity = "1" if busy is not None else "0.35"
         out.append(f'<rect x="{x0:.1f}" y="{mt:.1f}" width="{w:.1f}" height="{ph:.1f}" fill="{fill}" fill-opacity="{opacity}" stroke="currentColor" stroke-opacity="0.3" stroke-width="0.5"><title>{html.escape(title)}</title></rect>')
         if excl:
-            out.append(f'<rect x="{x0:.1f}" y="{mt:.1f}" width="{w:.1f}" height="{ph:.1f}" fill="url(#exclhatch)" stroke="currentColor" stroke-opacity="0.4" stroke-width="0.75"/>')
+            out.append(f'<rect x="{x0:.1f}" y="{mt:.1f}" width="{w:.1f}" height="{ph:.1f}" fill="url(#gridexclhatch)" stroke="currentColor" stroke-opacity="0.4" stroke-width="0.75"/>')
         if g.get("recommended"):
             out.append(f'<rect x="{x0:.1f}" y="{mt:.1f}" width="{w:.1f}" height="{ph:.1f}" fill="none" stroke="currentColor" stroke-width="2"/>')
             out.append(_txt((x0 + x1) / 2, mt - 10, f"▼ {c:.2f}", 10, "middle"))

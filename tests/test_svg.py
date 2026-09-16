@@ -106,6 +106,25 @@ def test_grid_ribbon_svg_no_data_channels_get_neutral_fill_and_dont_crash():
     assert "#C9CFD6" in s
 
 
+def test_grid_ribbon_svg_takes_no_exclusions_kwarg():
+    """Each grid item already carries its own excluded flag; the ribbon has no separate exclusions param."""
+    import inspect
+    params = inspect.signature(grid_ribbon_svg).parameters
+    assert "exclusions" not in params
+
+
+def test_grid_ribbon_svg_hatch_pattern_id_is_unique_from_band_svg():
+    """band_svg and grid_ribbon_svg can land in the same page (share_page.py); duplicate SVG <pattern>
+    ids are invalid HTML, so the ribbon must use its own id, not band_svg's #exclhatch."""
+    grid = [{"center_mhz": 902.25, "busy": None, "floor": None, "excluded": True, "recommended": False}]
+    ribbon = grid_ribbon_svg(grid)
+    assert 'id="gridexclhatch"' in ribbon and 'url(#gridexclhatch)' in ribbon
+    assert 'id="exclhatch"' not in ribbon
+    chans = [{"mhz": 902.0, "label": "", "floor_med": -110.0, "p90_med": -100.0, "peak_max": -80.0, "busy_mean": 0.1}]
+    band = band_svg(chans, exclusions=[(902_000_000, 903_000_000)])
+    assert 'id="exclhatch"' in band and 'id="gridexclhatch"' not in band
+
+
 def test_band_svg_auto_range_true_differs_from_default_for_low_narrow_values():
     chans = [{"mhz": 902.0, "label": "", "floor_med": -110.0, "p90_med": -100.0, "peak_max": -80.0, "busy_mean": 0.02},
              {"mhz": 911.5, "label": "", "floor_med": -108.0, "p90_med": -100.0, "peak_max": -80.0, "busy_mean": 0.12}]

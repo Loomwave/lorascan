@@ -119,6 +119,9 @@ def test_map_page_shows_best_500khz_slot_grid_ribbon_when_data_present(tmp_path)
     assert re.search(r"9\d\d\.(25|75)", html), "expected a grid centre ending .25 or .75 in the page"
     assert "911.75" in html
     assert "<script" not in html          # no located cells in this fixture -> no Leaflet enhancement either; page is pure static SVG
+    # the recommendation line uses the recommendation's own "why" (busy/floor/LoRa/clearance), not a hardcoded "clear"
+    assert "no known LoRa" in html and "clear of exclusion zones" in html
+    assert "scanned at 500 kHz yet" not in html
 
 
 def test_map_page_shows_no_500khz_data_note_when_absent(tmp_path):
@@ -130,3 +133,18 @@ def test_map_page_shows_no_500khz_data_note_when_absent(tmp_path):
     html = render_map_page(m)
     assert "Best 500 kHz slot" in html
     assert "scanned at 500 kHz yet" in html
+
+
+def test_map_page_shows_ribbon_and_widen_note_when_all_500khz_data_is_excluded(tmp_path):
+    """Loomwave/lorascan review round 1 (blocking): a submitter who only scanned 902.25 MHz (inside the
+    default 902.0-903.25 exclusion zone) has REAL 500 kHz data, but recommend_grid_slots' `recommended`
+    is None because every measured window is excluded. That must not be conflated with "no data"."""
+    from lorascan.share_page import render_map_page, map_data
+    from lorascan.share_server import ShareDB
+    db = ShareDB(str(tmp_path / "excl_only.sqlite"))
+    _ingest_500khz_row(db, freq_hz=902_250_000, busy=0.05, floor=-115.0)   # 902.0-902.5 MHz window, inside 902.0-903.25 exclusion
+    m = map_data(db)
+    html = render_map_page(m)
+    assert "<svg" in html and "902.25" in html                             # the ribbon still renders with the real data
+    assert "Every measured 500 kHz channel falls inside an exclusion zone" in html
+    assert "scanned at 500 kHz yet" not in html                            # must NOT show the no-data note

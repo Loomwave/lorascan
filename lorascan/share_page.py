@@ -181,11 +181,16 @@ def render_map_page(m: dict, tiles: dict | None = None) -> str:
         if m.get("exclusions"):
             parts.append('<div class="note">Hatched = excluded from recommendations (band edges and the 33 cm amateur repeater segments: ' + ", ".join(f"{lo:.3f}–{hi:.3f} MHz" for lo, hi in m["exclusions"]) + '). Data is still collected there; those channels are listed last and struck through.</div>')
         parts.append('<h2>Best 500 kHz slot (coordination grid)</h2><div class="note">the fixed .250/.750 grid of 52 channels that MeshCore-500 meshes coordinate on; colour auto-ranged to the data\'s spread; struck = exclusion zone.</div>')
+        grid = m.get("grid") or []
+        has_500khz_data = any(g["busy"] is not None for g in grid)
         gr = m.get("grid_recommend") or {}
         rc = gr.get("recommended")
-        if rc:
-            parts.append(f'<p><strong>Recommended: {rc["center_mhz"]:.2f} MHz ({rc["start_mhz"]:.2f}–{rc["end_mhz"]:.2f}) — busy {rc["busy_w"] * 100:.0f}%, floor {rc["floor_w"]:.0f} dBm, clear</strong></p>')
-            parts.append('<div class="fig">' + grid_ribbon_svg(m.get("grid") or [], exclusions=zones_hz) + '</div>')
+        if has_500khz_data:
+            if rc:
+                parts.append(f'<p><strong>Recommended: {rc["center_mhz"]:.2f} MHz ({rc["start_mhz"]:.2f}–{rc["end_mhz"]:.2f}) — {rc["why"]}</strong></p>')
+            else:
+                parts.append('<p class="note">Every measured 500 kHz channel falls inside an exclusion zone — widen the survey (scan more of the band with <code>--bw …,500</code>) to find a usable slot.</p>')
+            parts.append('<div class="fig">' + grid_ribbon_svg(grid) + '</div>')
         else:
             parts.append('<p class="note">No submitter has scanned at 500 kHz yet — run a survey with <code>--bw …,500</code> and share it to populate this.</p>')
         def _tr(flag):                  # Python 3.11: no backslashes inside f-string expressions
