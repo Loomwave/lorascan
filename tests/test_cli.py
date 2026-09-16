@@ -157,3 +157,22 @@ def test_report_all_windows_excluded_note(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "every 500 kHz window overlaps an exclusion zone" in out
     assert "best 500 kHz slot" not in out
+
+def test_report_recommend_grid_prints_grid_slot(tmp_path, capsys):
+    # 910.25 MHz is already a clean MeshCore-500 .250/.750 grid center (902.25 + 16*0.5).
+    db = str(tmp_path / "s.db"); st = Store(db); rid = st.new_run("survey", "fake", "")
+    st.add_energy(rid, _e(910_250_000, 500_000, -119.0, 0.02))
+    assert cli.main(["report", "--db", db, "--out", str(tmp_path / "r.html"), "--recommend-grid"]) == 0
+    out = capsys.readouterr().out
+    assert "best 500 kHz grid slot" in out
+    line = next(l for l in out.splitlines() if "best 500 kHz grid slot" in l)
+    mhz = line.split("MHz", 1)[0].strip().rsplit(" ", 1)[1]
+    assert mhz.endswith(".25") or mhz.endswith(".75")
+
+def test_report_without_recommend_grid_is_free_grid(tmp_path, capsys):
+    db = str(tmp_path / "s.db"); st = Store(db); rid = st.new_run("survey", "fake", "")
+    st.add_energy(rid, _e(910_250_000, 500_000, -119.0, 0.02))
+    assert cli.main(["report", "--db", db, "--out", str(tmp_path / "r.html")]) == 0
+    out = capsys.readouterr().out
+    assert "best 500 kHz slot" in out
+    assert "grid" not in out
