@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.1.27 — 2026-09-16
+- The auto-ranged band-summary and 500 kHz-ribbon legends show the colour-scale gradient swatch again, laid out to the LEFT of the "busy X% → Y%" text so swatch and label no longer overlap. (0.1.26 dropped the swatch to fix the overlap; this restores it, positioned.) A test now guards the swatch against silent removal.
 ## 0.1.26 — 2026-09-16
 - Fix: the auto-ranged band-summary legend on the community page had a colour swatch overlapping the word "auto-ranged". The legend is now text-only ("busy X% → Y% · colour auto-ranged"), matching the 500 kHz ribbon.
 ## 0.1.25 — 2026-09-16
