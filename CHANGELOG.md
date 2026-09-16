@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.1.24 — 2026-09-16
+- Community share page: a "Best 500 kHz slot (coordination grid)" section. When any submitter has scanned at 500 kHz bandwidth, the page ranks and draws the fixed `.250/.750` grid of 52 channels as a static ribbon (recommended channel ringed, exclusion-zone channels struck, hover for busy/floor), driven by the same `recommend_grid_slots` logic; when no one has, it shows how to populate it. Channel colours — and the band-summary strip — now **auto-range** to the data's actual busy spread, so a quiet band no longer renders every bar the same pale colour (`busy_colour` gained optional `vmin`/`vmax`; the per-station report is unchanged). The bulk-export endpoints (`/v1/dump.json`, `/v1/dump.csv`, from 0.1.22) are now documented in the share-server deploy README.
 ## 0.1.23 — 2026-09-16
 - Grid-aligned 500 kHz recommendation: `lorascan report --recommend-grid` ranks the fixed `.250/.750` grid of 52 non-overlapping 500 kHz channels (902.25, 902.75, … 927.75 MHz) — the coordination grid MeshCore-500 deployments share so neighbours interoperate — instead of a free window. Each grid channel is scored worst-case from the true 500 kHz-bandwidth energy that falls in it (reusing the v0.1.21 scoring), with exclusion-zone channels struck. Without the flag the free-grid recommendation is unchanged. New `report/slot_recommend.recommend_grid_slots` / `grid_centers`.
 ## 0.1.22 — 2026-09-16
