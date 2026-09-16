@@ -7,13 +7,18 @@ Stdlib only: ThreadingHTTPServer + SQLite. One process, one database file. Route
   GET  /v1/stats                counts per table, submitters, flagged rows
   GET  /                        the community map page (inline SVG, no JavaScript, no CDN)
   GET  /v1/map.json             the fleet aggregates behind that page (cells, band, when, submitters)
+  GET  /v1/dump.json            bulk unflagged energy rows (incl. bw_hz) + submitters, as JSON
+  GET  /v1/dump.csv             the same unflagged energy rows as CSV (submitter,freq_hz,bw_hz,bucket_s,bucket,hours,floor_p10_med,p90_med,peak_max,busy_mean)
 Idempotent: energy upserts on (submitter, freq_hz, bw_hz, bucket_s, bucket), cad on (submitter, freq_hz,
 bw_hz, sf), decode on (submitter, freq_hz, network, preset); a re-send never double-counts. Documents
 whose floor is above -70 dBm on > 90 % of channels are stored with flagged=1 (never merged into the map).
 Run: lorascan-share-server --db /data/share.sqlite --port 8081   (behind TLS at share.lorascan.app)."""
 from __future__ import annotations
 import argparse
+import csv
+import datetime as dt
 import gzip
+import io
 import json
 import sqlite3
 import threading
@@ -22,6 +27,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 FORMAT = "lorascan-share/2"
 ENERGY_COLS = ("n_rows", "n_samples", "hours", "floor_p10_med", "p90_med", "peak_max", "busy_mean")
+DUMP_CSV_COLS = ("submitter", "freq_hz", "bw_hz", "bucket_s", "bucket", "hours", "floor_p10_med", "p90_med", "peak_max", "busy_mean")
+DUMP_SUBMITTER_COLS = ("submitter", "tool", "board", "calibration", "cell_lat", "cell_lon", "cell_size", "uploads", "last_seen")
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS submitters (submitter TEXT PRIMARY KEY, first_seen REAL, last_seen REAL, uploads INTEGER DEFAULT 0, tool TEXT, board TEXT, calibration TEXT, cell_lat REAL, cell_lon REAL, cell_size REAL);
 CREATE TABLE IF NOT EXISTS energy (submitter TEXT, freq_hz INTEGER, bw_hz INTEGER, bucket_s INTEGER, bucket TEXT, n_rows INTEGER, n_samples INTEGER, hours REAL,
@@ -178,6 +185,21 @@ def make_share_server(host: str, port: int, db_path: str, max_gzip: int = 4_000_
                 with db.lock:
                     m = map_data(db)
                 return self._send(200, m)
+            if path == "/v1/dump.json":
+                with db.lock:
+                    energy = [{k: v for k, v in row.items() if k != "flagged"} for row in db.rows("energy") if row.get("flagged") != 1]
+                    submitters = [{k: row.get(k) for k in DUMP_SUBMITTER_COLS} for row in db.rows("submitters")]
+                generated = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                return self._send(200, {"generated": generated, "count": len(energy), "energy": energy, "submitters": submitters})
+            if path == "/v1/dump.csv":
+                with db.lock:
+                    energy = [row for row in db.rows("energy") if row.get("flagged") != 1]
+                buf = io.StringIO()
+                w = csv.writer(buf)
+                w.writerow(DUMP_CSV_COLS)
+                for row in energy:
+                    w.writerow([row.get(c) for c in DUMP_CSV_COLS])
+                return self._send(200, buf.getvalue(), "text/plain; charset=utf-8")
             if path == "/v1/watermark":
                 sub = self.headers.get("X-Lorascan-Submitter", "")
                 return self._send(200, {"latest": db.latest(sub) if sub else {"hour": None, "day": None}})

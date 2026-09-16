@@ -9,13 +9,13 @@ from lorascan.measure.energy import EnergyRow
 from lorascan.measure.cad import CadRow
 
 
-def _store(tmp_path, hours=30, name="s.db"):
+def _store(tmp_path, hours=30, name="s.db", bw_hz=125_000):
     s = Store(str(tmp_path / name)); rid = s.new_run("survey", "fake", "")
     t0 = 1_757_800_000.0
     for h in range(hours):
         for f in (902_000_000, 911_500_000):
-            s.add_energy(rid, EnergyRow(ts=t0 + h * 3600, freq_hz=f, bw_hz=125_000, engine="poll", n=100, floor_dbm=-110, p50=-105, p90=-100, peak=-80, busy_frac=0.1))
-    s.add_cad(rid, CadRow(ts=t0, freq_hz=911_500_000, bw_hz=125_000, sf=9, symbols=2, n_cad=50, hits=20, longest_run=4, det_peak=23, det_min=10))
+            s.add_energy(rid, EnergyRow(ts=t0 + h * 3600, freq_hz=f, bw_hz=bw_hz, engine="poll", n=100, floor_dbm=-110, p50=-105, p90=-100, peak=-80, busy_frac=0.1))
+    s.add_cad(rid, CadRow(ts=t0, freq_hz=911_500_000, bw_hz=bw_hz, sf=9, symbols=2, n_cad=50, hits=20, longest_run=4, det_peak=23, det_min=10))
     return s
 
 
@@ -93,3 +93,46 @@ def test_rate_limit_per_submitter(tmp_path):
     codes = [_post(url, body, submitter="dead0000beef0000")[0] for _ in range(3)]
     srv.shutdown()
     assert codes == [200, 200, 429]
+
+
+def test_dump_json_has_bw_hz_and_matching_count(tmp_path, server):
+    srv, url = server
+    doc = build_share(_store(tmp_path, 2, bw_hz=500_000), None, "a1b2c3d4e5f60718", "fake", granularity="hour")
+    r = upload_share(doc, url, retries=1, backoff_s=0)
+    assert r["accepted"] == 4
+    resp = urllib.request.urlopen(url + "/v1/dump.json")
+    out = json.loads(resp.read().decode())
+    assert resp.status == 200
+    assert out["energy"]
+    assert all("bw_hz" in row for row in out["energy"])
+    assert any(row["bw_hz"] == 500_000 for row in out["energy"])
+    assert out["count"] == len(out["energy"])
+    assert "generated" in out
+    assert isinstance(out["submitters"], list) and any(s["submitter"] == "a1b2c3d4e5f60718" for s in out["submitters"])
+
+
+def test_dump_json_excludes_flagged_uploads(tmp_path, server):
+    srv, url = server
+    doc = build_share(_store(tmp_path, 2), None, "c0ffee11c0ffee11", "fake")
+    for e in doc["energy"]:
+        e["floor_p10_med"] = -60.0                                         # every channel floor above -70 dBm -> flagged
+    r = upload_share(doc, url, retries=1, backoff_s=0)
+    assert r.get("flagged") is True
+    resp = urllib.request.urlopen(url + "/v1/dump.json")
+    out = json.loads(resp.read().decode())
+    assert not any(row["submitter"] == "c0ffee11c0ffee11" for row in out["energy"])
+    assert not any("flagged" in row for row in out["energy"])
+
+
+def test_dump_csv_header_and_row_count(tmp_path, server):
+    srv, url = server
+    doc = build_share(_store(tmp_path, 2), None, "a1b2c3d4e5f60718", "fake", granularity="hour")
+    upload_share(doc, url, retries=1, backoff_s=0)
+    resp = urllib.request.urlopen(url + "/v1/dump.csv")
+    assert resp.status == 200
+    text = resp.read().decode()
+    lines = text.splitlines()
+    assert lines[0] == "submitter,freq_hz,bw_hz,bucket_s,bucket,hours,floor_p10_med,p90_med,peak_max,busy_mean"
+    db = ShareDB(srv.db_path)
+    n_unflagged = sum(1 for row in db.rows("energy") if row["flagged"] != 1)
+    assert len(lines) - 1 == n_unflagged
