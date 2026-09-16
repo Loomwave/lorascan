@@ -28,25 +28,50 @@ clean per-user install on a Pi whose system Python is externally managed (PEP 66
 then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.19/lorascan-0.1.19-py3-none-any.whl`
 (`--system-site-packages` so the apt-installed spidev/gpiod modules are visible).
 
-## Wire and describe your radio
+## Setup (recommended)
+
+New here? Run the guided setup — it checks your SPI/pin wiring, can import the radio
+config from an existing meshtasticd or openHOP install, sets your location, verifies the
+upload, and prints a first look at the band:
+
+```
+lorascan setup
+```
+
+It writes `~/.config/lorascan/config.yaml`, after which the daily commands need no flags:
+
+```
+lorascan scan survey --db site.db --duration 2h
+lorascan share
+```
+
+Everything below is the manual path — reach for it when you want to configure a piece by
+hand or understand what `setup` is doing.
+
+## Manual configuration (the details)
+
+`lorascan setup` automates all of this; use these when you want to do it yourself.
+
+### Wire and describe your radio
 
 Copy `lorascan/profiles/generic-spidev.yaml` (`python3 -c "import lorascan.profile as p; print(p.PROFILE_DIRS[0])"` prints where the shipped profiles live after `pip install`), set the GPIO line numbers your module uses (BUSY, DIO1, RESET,
 optional RXEN/TXEN) and the SPI device. Keys and meaning: see spec §3.1. Pin numbers are gpiochip0 line
-offsets (BCM numbers on a Pi). Chip-select stays with the kernel (`nss: kernel`, use a CE pin).
+offsets (BCM numbers on a Pi). `nss` may be `kernel` (a hardware CE0/CE1) or a GPIO line number for a
+software-driven chip-select on a single-radio host.
 
 ```
 lorascan probe    --profile my-board.yaml     # SPI first light: expects sync word 0x14 0x24 -> GOOD
 lorascan selftest --profile my-board.yaml     # init, device errors, two 2-second energy reads
 ```
 
-### CH341 USB-SPI sticks (MeshToad V3, PineDio-USB class) — experimental
+#### CH341 USB-SPI sticks (MeshToad V3, PineDio-USB class) — experimental
 
 `pip install pyusb`, then `--profile meshtoad-v3-ch341` (profile `bus: {type: ch341, dev: auto}`; `dev`
 may name the stick's USB serial). The backend is a port of the Loomwave Rust CH341 driver (framing,
 pin map and the SCK/MOSI-must-be-outputs fix included) but has not yet been run against a stick from
 this tool; use `probe` first and report what you see. Add a udev rule for 1a86:5512 or run as root.
 
-## Turn an existing node into a scanner (meshtasticd / openHOP)
+### Turn an existing node into a scanner (meshtasticd / openHOP)
 
 ```
 sudo lorascan auto --from meshtasticd --dry-run -- survey --db site.db --duration 2h --cad-grid 500000
