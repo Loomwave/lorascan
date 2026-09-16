@@ -5,8 +5,9 @@ from __future__ import annotations
 import datetime as dt
 import html
 from .plan.grid import label_for
-from .report.svg import busy_colour, band_svg, when_svg
-from .exclusions import DEFAULT_EXCLUSIONS, excluded, zones_mhz
+from .report.svg import busy_colour, band_svg, when_svg, grid_ribbon_svg
+from .exclusions import DEFAULT_EXCLUSIONS, excluded, overlaps, zones_mhz
+from .report.slot_recommend import recommend_grid_slots, grid_centers, grid_width_rows
 
 
 def map_data(db, exclusions=None) -> dict:
@@ -20,6 +21,7 @@ def map_data(db, exclusions=None) -> dict:
     band_acc: dict[int, dict] = {}
     cell_acc: dict[tuple, dict] = {}
     when_acc: dict[tuple, list] = {}
+    bybw_acc: dict[tuple, dict] = {}
     for sub, f, bw, bs, bucket, hours, fl, p90, pk, busy in rows:
         b = band_acc.setdefault(f, {"floors": [], "busy": [], "peak": -999.0, "subs": set(), "hours": 0.0})
         b["floors"].append(fl); b["busy"].append(busy); b["peak"] = max(b["peak"], pk); b["subs"].add(sub); b["hours"] += hours or 0.0
@@ -28,6 +30,8 @@ def map_data(db, exclusions=None) -> dict:
             ca = cell_acc.setdefault(c, {"subs": set(), "hours": 0.0, "chan": {}})
             ca["subs"].add(sub); ca["hours"] += hours or 0.0
             ch = ca["chan"].setdefault(f, {"busy": [], "floors": []}); ch["busy"].append(busy); ch["floors"].append(fl)
+        bb = bybw_acc.setdefault((f, bw), {"floors": [], "busy": [], "peak": -999.0, "p90s": []})
+        bb["floors"].append(fl); bb["busy"].append(busy); bb["peak"] = max(bb["peak"], pk); bb["p90s"].append(p90)
         if bs == 3600 and len(bucket) >= 13:
             try:
                 t = dt.datetime.strptime(bucket[:13], "%Y-%m-%dT%H")
@@ -51,9 +55,26 @@ def map_data(db, exclusions=None) -> dict:
                       "quietest": sorted(chans, key=lambda c: (c["excluded"], c["busy"], c["floor"] if c["floor"] is not None else 0))[:5],
                       "busiest": sorted(chans, key=lambda c: -c["busy"])[:5]})
     when = [[(round(when_acc[(wd, h)][0] / when_acc[(wd, h)][1], 4) if (wd, h) in when_acc else None) for h in range(24)] for wd in range(7)]
+    # per-(freq, bw) aggregate across submitters, feeding the grid-aligned 500 kHz slot recommendation
+    by_bw = []
+    for (f, bw), bb in sorted(bybw_acc.items()):
+        by_bw.append({"freq_hz": f, "bw_hz": bw, "floor_med": max(bb["floors"]) if bb["floors"] else None,
+                      "busy_mean": round(sum(bb["busy"]) / len(bb["busy"]), 4) if bb["busy"] else 0.0,
+                      "peak_max": bb["peak"], "p90_med": max(bb["p90s"]) if bb["p90s"] else None,
+                      "n_rows": 0, "n_samples": 0})
+    rec = recommend_grid_slots(by_bw, [], [], 500_000, exclusions)
+    centers = grid_centers()
+    synth = {r["freq_hz"]: r for r in grid_width_rows(by_bw, centers, 500_000)}
+    rec_center = rec["recommended"]["center_hz"] if rec.get("recommended") else None
+    grid = []
+    for c in centers:
+        s = synth.get(c)
+        grid.append({"center_mhz": c / 1e6, "busy": (s["busy_mean"] if s else None), "floor": (s["floor_med"] if s else None),
+                     "excluded": overlaps(c - 250_000, c + 250_000, exclusions), "recommended": (c == rec_center)})
     return {"generated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "submitters": len(subs),
             "flagged_submitters": len(flagged), "no_location_submitters": sum(1 for s in subs if s[4] is None and s[0] not in flagged),
             "cells": cells, "band": band, "when": when, "exclusions": zones_mhz(exclusions), "exclusions_hz": [list(z) for z in exclusions],
+            "grid": grid, "grid_recommend": rec,
             "submitter_rows": [{"id": s[0][:8], "tool": s[1], "board": s[2], "calibration": s[3], "cell": (f"{s[4]:.1f},{s[5]:.1f}" if s[4] is not None else "none"),
                                 "uploads": s[7], "last_seen": dt.datetime.fromtimestamp(s[8], dt.timezone.utc).strftime("%Y-%m-%d %H:%MZ") if s[8] else "", "flagged": s[0] in flagged} for s in subs]}
 
@@ -154,11 +175,24 @@ def render_map_page(m: dict, tiles: dict | None = None) -> str:
         parts.append('<h2>Where</h2><div class="note">each square is a 0.1° cell (about 10 km) that at least one scanner has shared; single-submitter cells are hatched. Uploads without a location count in the band summary but not on the map.</div>')
         parts.append('<div class="fig"><div id="cells-static">' + (cells_svg(m["cells"]) or '<p class="note">no cells with a location yet</p>') + '</div>'
                      '<div id="leaflet-map" style="height:480px" hidden></div><div id="basemap-note" class="note">basemap: loading OpenStreetMap tiles via Leaflet… (the grid above is the no-script view)</div></div>')
-        parts.append('<h2>Band summary, all submitters</h2><div class="note">bar = median floor to maximum peak across submitters; colour = mean busy fraction; label = who is known to live there.</div>')
+        parts.append('<h2>Band summary, all submitters</h2><div class="note">bar = median floor to maximum peak across submitters; label = who is known to live there; colour = mean busy fraction, auto-ranged to this band\'s spread.</div>')
         zones_hz = [tuple(z) for z in m.get("exclusions_hz", [])]
-        parts.append('<div class="fig">' + band_svg(m["band"], exclusions=zones_hz) + '</div>')
+        parts.append('<div class="fig">' + band_svg(m["band"], exclusions=zones_hz, auto_range=True) + '</div>')
         if m.get("exclusions"):
             parts.append('<div class="note">Hatched = excluded from recommendations (band edges and the 33 cm amateur repeater segments: ' + ", ".join(f"{lo:.3f}–{hi:.3f} MHz" for lo, hi in m["exclusions"]) + '). Data is still collected there; those channels are listed last and struck through.</div>')
+        parts.append('<h2>Best 500 kHz slot (coordination grid)</h2><div class="note">the fixed .250/.750 grid of 52 channels that MeshCore-500 meshes coordinate on; colour auto-ranged to the data\'s spread; struck = exclusion zone.</div>')
+        grid = m.get("grid") or []
+        has_500khz_data = any(g["busy"] is not None for g in grid)
+        gr = m.get("grid_recommend") or {}
+        rc = gr.get("recommended")
+        if has_500khz_data:
+            if rc:
+                parts.append(f'<p><strong>Recommended: {rc["center_mhz"]:.2f} MHz ({rc["start_mhz"]:.2f}–{rc["end_mhz"]:.2f}) — {rc["why"]}</strong></p>')
+            else:
+                parts.append('<p class="note">Every measured 500 kHz channel falls inside an exclusion zone — widen the survey (scan more of the band with <code>--bw …,500</code>) to find a usable slot.</p>')
+            parts.append('<div class="fig">' + grid_ribbon_svg(grid) + '</div>')
+        else:
+            parts.append('<p class="note">No submitter has scanned at 500 kHz yet — run a survey with <code>--bw …,500</code> and share it to populate this.</p>')
         def _tr(flag):                  # Python 3.11: no backslashes inside f-string expressions
             return '<tr class="excluded">' if flag else "<tr>"
         rows = "".join(f"{_tr(c.get('excluded'))}<td>{c['mhz']:.3f}{' (excluded)' if c.get('excluded') else ''}</td><td>{e(c['label'])}</td><td>{c['busy_mean'] * 100:.1f}</td><td>{c['floor_med']:.0f}</td><td>{c['peak_max']:.0f}</td><td>{c['n_submitters']}</td><td>{c['hours']:.1f}</td></tr>"

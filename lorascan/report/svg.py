@@ -11,16 +11,25 @@ def _lerp(a, b, t):
     return a + (b - a) * t
 
 
-def busy_colour(v) -> str:
-    """0..1 busy fraction -> YlOrRd-like hex; None -> hatched grey."""
+def busy_colour(v, vmin=None, vmax=None) -> str:
+    """0..1 busy fraction -> YlOrRd-like hex; None -> hatched grey.
+
+    With vmin and vmax both given, v is first auto-ranged: t = (v - vmin) / (vmax - vmin), clamped to
+    [0, 1] (vmax <= vmin -> 0.0), then mapped through the same stops. This is what lets a low-occupancy
+    band (every bar a pale near-identical colour under the absolute 0..1 mapping) show its real spread.
+    With vmin/vmax omitted (the default), behaviour is exactly the old absolute 0..1 mapping."""
     if v is None:
         return "#C9CFD6"
-    v = max(0.0, min(1.0, float(v)))
+    v = float(v)
+    if vmin is not None and vmax is not None:
+        t = 0.0 if vmax <= vmin else max(0.0, min(1.0, (v - vmin) / (vmax - vmin)))
+    else:
+        t = max(0.0, min(1.0, v))
     stops = [(0.0, (255, 255, 204)), (0.25, (254, 217, 118)), (0.5, (253, 141, 60)), (0.75, (227, 26, 28)), (1.0, (128, 0, 38))]
     for (t0, c0), (t1, c1) in zip(stops, stops[1:]):
-        if v <= t1:
-            t = (v - t0) / (t1 - t0) if t1 > t0 else 0.0
-            return "#%02x%02x%02x" % tuple(int(round(_lerp(c0[i], c1[i], t))) for i in range(3))
+        if t <= t1:
+            u = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
+            return "#%02x%02x%02x" % tuple(int(round(_lerp(c0[i], c1[i], u))) for i in range(3))
     return "#800026"
 
 
@@ -142,8 +151,13 @@ def heatmap_svg(heat: dict, layer: str = "busy", width: int = 1060, exclusions=N
     return "".join(out)
 
 
-def band_svg(channels: list, width: int = 1060, exclusions=None) -> str:
-    """Band summary: one bar per channel from floor (P10) to peak, coloured by busy fraction."""
+def band_svg(channels: list, width: int = 1060, exclusions=None, auto_range: bool = False) -> str:
+    """Band summary: one bar per channel from floor (P10) to peak, coloured by busy fraction.
+
+    auto_range=True colours each bar via busy_colour(busy, vmin, vmax) with vmin/vmax = min/max of
+    busy_mean over the drawn channels, so a low-occupancy band still shows its real spread of colour
+    instead of every bar coming out the same pale shade. Default False keeps the absolute 0..1 mapping
+    (unchanged for the per-station report, which also calls band_svg)."""
     chans = [c for c in channels if c.get("floor_med") is not None and c.get("peak_max") is not None]
     if not chans:
         return ""
@@ -161,6 +175,11 @@ def band_svg(channels: list, width: int = 1060, exclusions=None) -> str:
     x_of = lambda mhz: ml + (mhz - fmin) / fspan * (pw - 8) + 4
     y_of = lambda dbm: mt + (hi - dbm) / span * ph
     bar_w = max(2.0, (pw / max(1, len(chans))) * 0.7)
+    if auto_range:
+        busy_vals = [c.get("busy_mean", 0) for c in chans]
+        vmin, vmax = (min(busy_vals), max(busy_vals)) if busy_vals else (None, None)
+    else:
+        vmin, vmax = None, None
     out = [f'<svg class="static" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {ph + mt + mb}" width="100%" role="img" aria-label="band summary" font-family="system-ui,sans-serif">']
     # gridlines every 10 dB
     d = lo
@@ -177,7 +196,8 @@ def band_svg(channels: list, width: int = 1060, exclusions=None) -> str:
         title = f"{c['mhz']:.3f} MHz: floor {c['floor_med']:.0f} dBm, P90 {c.get('p90_med', c['floor_med']):.0f} dBm, peak {c['peak_max']:.0f} dBm, busy {c.get('busy_mean', 0) * 100:.1f} %"
         if c.get("label"):
             title += f" ({c['label']})"
-        out.append(f'<rect x="{x:.1f}" y="{y1:.1f}" width="{bar_w:.1f}" height="{h:.1f}" fill="{busy_colour(c.get("busy_mean", 0))}" stroke="currentColor" stroke-opacity="0.35" stroke-width="0.5"><title>{html.escape(title)}</title></rect>')
+        fill = busy_colour(c.get("busy_mean", 0), vmin, vmax) if auto_range else busy_colour(c.get("busy_mean", 0))
+        out.append(f'<rect x="{x:.1f}" y="{y1:.1f}" width="{bar_w:.1f}" height="{h:.1f}" fill="{fill}" stroke="currentColor" stroke-opacity="0.35" stroke-width="0.5"><title>{html.escape(title)}</title></rect>')
         if c.get("p90_med") is not None:
             yp = y_of(c["p90_med"])
             out.append(f'<line x1="{x:.1f}" y1="{yp:.1f}" x2="{x + bar_w:.1f}" y2="{yp:.1f}" stroke="currentColor" stroke-width="1"/>')
@@ -254,5 +274,65 @@ def when_svg(when: list, width: int = 700) -> str:
     for h in range(0, 24, 3):
         out.append(_txt(ml + h * cell_w + cell_w / 2, mt + ph + 16, f"{h:02d}", 10, "middle"))
     out.append(_txt(ml + pw / 2, mt + ph + 32, "hour (UTC)", 11, "middle"))
+    out.append("</svg>")
+    return "".join(out)
+
+
+_AXIS_TICKS_MHZ = (902, 906, 910, 914, 918, 922, 926, 928)
+
+
+_GRID_EXCL_DEFS = '<defs><pattern id="gridexclhatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="currentColor" stroke-opacity="0.35" stroke-width="3"/></pattern></defs>'
+
+
+def grid_ribbon_svg(grid: list, width: int = 1060) -> str:
+    """Best-500-kHz-slot ribbon: one horizontal band across 902-928 MHz, one segment per fixed
+    .250/.750 MeshCore-500 grid channel. Colour auto-ranges to the min/max busy fraction actually
+    measured (vs. the absolute 0..1 mapping, which flattens every bar to the same pale colour on a
+    quiet band). No-data channels get a faint neutral fill; excluded channels are hatched (each grid
+    item already carries its own `excluded` flag, so there is no separate exclusions parameter); the
+    recommended channel gets an outline ring and a small label. Static SVG, no JavaScript.
+
+    Uses its own hatch pattern id (#gridexclhatch) rather than band_svg's #exclhatch: both figures can
+    appear on the same page (share_page.py), and duplicate SVG <pattern> ids are invalid HTML."""
+    if not grid:
+        return ""
+    ml, mr, mt, mb = 16, 16, 50, 46
+    ph = 60
+    pw = width - ml - mr
+    fmin, fmax = 902.0, 928.0
+    fspan = fmax - fmin
+    x_of = lambda mhz: ml + (mhz - fmin) / fspan * pw
+    data_vals = [g["busy"] for g in grid if g.get("busy") is not None]
+    vmin, vmax = (min(data_vals), max(data_vals)) if data_vals else (None, None)
+    out = [f'<svg class="static" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {ph + mt + mb}" width="100%" role="img" aria-label="best 500 kHz slot grid" font-family="system-ui,sans-serif">', _GRID_EXCL_DEFS]
+    for g in grid:
+        c = g["center_mhz"]
+        x0, x1 = x_of(c - 0.25), x_of(c + 0.25)
+        w = max(1.0, x1 - x0)
+        busy = g.get("busy")
+        floor = g.get("floor")
+        excl = bool(g.get("excluded"))
+        if excl:
+            title = f"{c:.2f} MHz  excluded (band edge)"
+        elif busy is not None:
+            floor_txt = "n/a" if floor is None else f"{floor:.0f} dBm"
+            title = f"{c:.2f} MHz  busy {busy * 100:.0f}%  floor {floor_txt}"
+        else:
+            title = f"{c:.2f} MHz  no 500 kHz data"
+        fill = busy_colour(busy, vmin, vmax) if busy is not None else "#C9CFD6"
+        opacity = "1" if busy is not None else "0.35"
+        out.append(f'<rect x="{x0:.1f}" y="{mt:.1f}" width="{w:.1f}" height="{ph:.1f}" fill="{fill}" fill-opacity="{opacity}" stroke="currentColor" stroke-opacity="0.3" stroke-width="0.5"><title>{html.escape(title)}</title></rect>')
+        if excl:
+            out.append(f'<rect x="{x0:.1f}" y="{mt:.1f}" width="{w:.1f}" height="{ph:.1f}" fill="url(#gridexclhatch)" stroke="currentColor" stroke-opacity="0.4" stroke-width="0.75"/>')
+        if g.get("recommended"):
+            out.append(f'<rect x="{x0:.1f}" y="{mt:.1f}" width="{w:.1f}" height="{ph:.1f}" fill="none" stroke="currentColor" stroke-width="2"/>')
+            out.append(_txt((x0 + x1) / 2, mt - 10, f"▼ {c:.2f}", 10, "middle"))
+    for t in _AXIS_TICKS_MHZ:
+        x = x_of(t)
+        out.append(f'<line x1="{x:.1f}" y1="{mt + ph}" x2="{x:.1f}" y2="{mt + ph + 4}" stroke="currentColor"/>')
+        out.append(_txt(x, mt + ph + 16, str(t), 10, "middle"))
+    out.append(_txt(ml + pw / 2, mt + ph + 32, "MHz  (fixed .250/.750 grid; ring = recommended, hatched = excluded)", 11, "middle"))
+    legend = f"busy {vmin * 100:.0f}% → {vmax * 100:.0f}%" if vmin is not None else "no 500 kHz data yet"
+    out.append(_txt(ml, 14, legend, 11, "start"))
     out.append("</svg>")
     return "".join(out)
