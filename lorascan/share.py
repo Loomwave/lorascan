@@ -176,3 +176,25 @@ def upload_share(doc: dict, to: str, retries: int = 3, backoff_s: float = 2.0, t
         time.sleep(backoff_s * attempts)
     reply.update({"sent": len(send["energy"]), "skipped": len(doc["energy"]) - len(send["energy"]), "bytes": len(body), "attempts": attempts, "watermark": latest})
     return reply
+
+
+def endpoint_health(base: str, timeout_s: float = 10.0, opener=None) -> dict:
+    """GET {base}/healthz then {base}/v1/watermark. Returns reachability so `setup` can
+    prove the target before the user walks away. opener defaults to urllib.request.urlopen."""
+    opener = opener or urllib.request.urlopen
+    base = base.rstrip("/")
+    out = {"ok": False, "status": None, "watermark": None, "error": None}
+    try:
+        with opener(urllib.request.Request(f"{base}/healthz"), timeout=timeout_s) as r:
+            out["status"] = getattr(r, "status", 200); r.read()
+        with opener(urllib.request.Request(f"{base}/v1/watermark"), timeout=timeout_s) as r:
+            body = r.read()
+        try:
+            wm = json.loads(body)
+        except ValueError:
+            wm = None
+        out["watermark"] = wm.get("latest") if isinstance(wm, dict) else None
+        out["ok"] = (out["status"] == 200)
+    except (OSError, ValueError) as e:
+        out["error"] = str(e)
+    return out

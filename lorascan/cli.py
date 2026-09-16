@@ -105,7 +105,11 @@ def _cad_steps(freqs, sfs=(7, 9, 11), bws=(125, 250), dwell_s=0.0):
 
 
 def _run_scan(a, kind: str) -> int:
-    prof = _profile(a.profile)
+    from . import station_config as _sc
+    prof_name = a.profile
+    if prof_name == "generic-spidev":                 # the argparse default = "not chosen"
+        prof_name = _sc.load().profile or prof_name
+    prof = _profile(prof_name)
     store = Store(a.db)
     if prof.bus_type == "fake":
         a.fake_clock = True          # a simulated radio never sleeps; drive its time from a fake clock
@@ -434,10 +438,15 @@ def cmd_export(a) -> int:
 
 
 def cmd_share(a) -> int:
+    from . import station_config as _sc
+    _cfg = _sc.load()
+    to = _sc.resolve(a.to, _cfg.endpoint, None)
+    cellarg = a.cell if a.cell is not None else (f"{_cfg.location[0]},{_cfg.location[1]}" if _cfg.location else None)
+    gran = _sc.resolve(a.granularity, _cfg.granularity, "hour")
     store = Store(a.db)
     cell = None
-    if a.cell:
-        lat, lon = (float(x) for x in a.cell.split(","))
+    if cellarg:
+        lat, lon = (float(x) for x in cellarg.split(","))
         cell = coarse_cell(lat, lon, a.cell_size)
     runs = store.runs()
     profile_name = runs[-1]["profile"] if runs else "unknown"
@@ -450,14 +459,14 @@ def cmd_share(a) -> int:
         doc, size = choose_by_budget(store, cell, token, profile_name, parse_budget(a.budget), offset, a.cell_size, a.run)
         print(f"[share] budget {a.budget}: chose granularity={doc['granularity']} tables={'energy' + (',cad,decode' if doc['cad'] or doc['decode'] else '')} ({size} bytes gzipped for the whole span)")
     else:
-        doc = build_share(store, cell, token, profile_name, offset, a.cell_size, a.run, granularity=a.granularity)
+        doc = build_share(store, cell, token, profile_name, offset, a.cell_size, a.run, granularity=gran)
     write_share(doc, a.out)
     print(f"[share] wrote {a.out}: {len(doc['energy'])} energy aggregates ({doc['granularity']}), {len(doc['cad'])} CAD rows, {len(doc['decode'])} decode rows, cell={doc['cell']}; {len(gzip_bytes(doc))} bytes gzipped")
-    if a.dry_run or not a.to:
+    if a.dry_run or not to:
         if not a.dry_run:
             print("[share] no --to given: nothing uploaded; send the file later with `lorascan upload FILE --to URL`", file=sys.stderr)
         return 0
-    return _upload(doc, a.to)
+    return _upload(doc, to)
 
 
 def _upload(doc: dict, to: str) -> int:
@@ -561,11 +570,71 @@ def cmd_syncfind(a) -> int:
 
 def cmd_upload(a) -> int:
     """Store-and-forward: upload a share file written earlier, from any machine (the submitter token is inside)."""
+    from . import station_config as _sc
+    to = _sc.resolve(a.to, _sc.load().endpoint, None)
+    if not to:
+        raise ValueError("no endpoint: pass --to or run `lorascan setup`")
     with open(a.file) as f:
         doc = json.load(f)
     if doc.get("format") != SHARE_FORMAT:
         raise ValueError(f"{a.file}: format {doc.get('format')!r}, this lorascan sends {SHARE_FORMAT}")
-    return _upload(doc, a.to)
+    return _upload(doc, to)
+
+
+def _build_wizard(a):
+    from . import setup, autoconf, share
+    class _CliRunner(setup.Runner):
+        def probe(self, profile):
+            prof = _profile(profile) if isinstance(profile, str) else profile
+            hal = open_hal(prof); r = Sx126x(hal, prof)
+            try:
+                return r.probe_bytes()
+            finally:
+                hal.close()
+        def selftest(self, profile):
+            prof = _profile(profile) if isinstance(profile, str) else profile
+            hal, radio = _open_radio(prof)
+            try:
+                row = polled_energy(radio, 911_500_000, 125, 0.2, sample_gap_s=0.01)
+                ok = row.n >= 5 and -126 < row.floor_dbm < -1
+                reason = "" if ok else ("floor-out-of-range" if row.n >= 5 else "init-timeout")
+                return {"ok": ok, "reason": reason}
+            finally:
+                hal.close()
+        def import_daemon(self, source, config):
+            return autoconf.resolve(source, config=config)
+        def endpoint_health(self, url):
+            return share.endpoint_health(url)
+        def first_upload(self, db, state):
+            st = Store(db); runs = st.runs()
+            pname = runs[-1]["profile"] if runs else "unknown"
+            cell = None
+            if state.get("location"):
+                cell = coarse_cell(state["location"][0], state["location"][1], DEFAULT_CELL_DEG)
+            doc = build_share(st, cell, submitter_token(), pname, 0.0, DEFAULT_CELL_DEG, None,
+                              granularity=state.get("granularity", "hour"))
+            r = upload_share(doc, state["endpoint"])
+            return {"ok": True, "sent": r["sent"], "accepted": r.get("accepted")}
+        def sweep(self, profile):
+            prof = _profile(profile) if isinstance(profile, str) else profile
+            hal, radio = _open_radio(prof)
+            rows = []
+            try:
+                for f in range(903_000_000, 927_000_000, 3_000_000):
+                    row = polled_energy(radio, f, 125, 0.1, sample_gap_s=0.01)
+                    rows.append((f, row.floor_dbm, row.peak_dbm))
+            finally:
+                hal.close()
+            return rows
+    w = setup.Wizard(setup.TtyIO(), _CliRunner(), home=None)
+    if getattr(a, "db", None):
+        w.state["db"] = a.db
+    return w
+
+
+def cmd_setup(a) -> int:
+    from . import setup
+    return setup.run(_build_wizard(a))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -634,7 +703,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--cell", default=None, help="lat,lon of the antenna; rounded to --cell-size degrees (omit for no location)")
     sp.add_argument("--cell-size", type=float, default=DEFAULT_CELL_DEG); sp.add_argument("--rssi-offset", type=float, default=None)
     sp.add_argument("--token-path", default=os.path.expanduser("~/.config/lorascan/token")); sp.add_argument("--dry-run", action="store_true")
-    sp.add_argument("--granularity", choices=("hour", "day"), default="hour", help="aggregate per hour (~53 KB/day gzipped) or per day (~3 KB/day)")
+    sp.add_argument("--granularity", choices=("hour", "day"), default=None, help="aggregate per hour (~53 KB/day gzipped) or per day (~3 KB/day) (default: the station config's, else hour)")
     sp.add_argument("--budget", default=None, help="bytes per day of survey, e.g. 20k/day: picks the coarsest document that fits")
     sp.add_argument("--to", default=None, help="upload endpoint, e.g. https://share.lorascan.app (gzip, incremental; omit to only write the file)")
     sp.set_defaults(fn=cmd_share)
@@ -651,7 +720,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--cr", type=int, default=5); sp.add_argument("--preamble", type=int, default=8); sp.add_argument("--syncs", default=None, help="e.g. 0x12,0x34 or 0x00-0x7F (default all 256)")
     sp.add_argument("--sync-dwell", type=float, default=1.0, help="seconds per sync word"); sp.add_argument("--verbose", "-v", action="store_true"); sp.set_defaults(fn=cmd_syncfind)
     sp = sub.add_parser("upload", help="upload a share file written earlier (store-and-forward from any machine)")
-    sp.add_argument("file"); sp.add_argument("--to", required=True); sp.set_defaults(fn=cmd_upload)
+    sp.add_argument("file"); sp.add_argument("--to", default=None, help="upload endpoint (default: the station config's share endpoint)"); sp.set_defaults(fn=cmd_upload)
+    sp = sub.add_parser("setup", help="guided first-run: validate pins, import a meshtasticd/openHOP config, set location, verify upload")
+    sp.add_argument("--db", default=None, help="an existing scan database to use for the first upload / first-light graph")
+    sp.set_defaults(fn=cmd_setup)
     return p
 
 

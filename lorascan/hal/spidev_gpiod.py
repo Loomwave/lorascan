@@ -4,6 +4,7 @@ python3-libgpiod 1.6), libgpiod v2, or lgpio as fallbacks. Pin numbers are gpioc
 from __future__ import annotations
 import time
 from . import HalError
+from .lock import acquire_device_lock
 
 
 class _GpioV1:
@@ -107,7 +108,6 @@ class SpidevGpiodHal:
         except ImportError as e:
             raise HalError("python3-spidev is not installed (apt install python3-spidev)") from e
         dev = profile.bus_dev
-        from .lock import acquire_device_lock
         self._lock_fd = acquire_device_lock(dev)
         bus, cs = dev.replace("/dev/spidev", "").split(".")
         self.spi = spidev.SpiDev()
@@ -125,10 +125,21 @@ class SpidevGpiodHal:
             if not isinstance(p, int):
                 raise HalError(f"profile pin {name!r} must be a GPIO line number")
             self.gpio.request_in(p)
-        if isinstance(self.pins.get("nss"), int):
-            raise HalError("software chip-select (pins.nss as a GPIO) is not supported in P1; use a kernel CE")
+        self._cs = self.pins.get("nss")               # int GPIO line = software CS; "kernel"/None = kernel CE
+        if isinstance(self._cs, int):
+            self.gpio.request_out(self._cs, 1)         # CS is active-low: idle HIGH (deasserted)
+            try:
+                self.spi.no_cs = True                  # single-radio host: suppress the kernel CE if honored
+            except (OSError, AttributeError):
+                pass                                   # BCM spidev may ignore SPI_NO_CS; the GPIO is the real select
 
     def xfer(self, tx: bytes) -> bytes:
+        if isinstance(self._cs, int):
+            self.gpio.set(self._cs, False)             # assert (low)
+            try:
+                return bytes(self.spi.xfer2(list(tx)))
+            finally:
+                self.gpio.set(self._cs, True)          # deassert (high)
         return bytes(self.spi.xfer2(list(tx)))
 
     def busy(self) -> bool:

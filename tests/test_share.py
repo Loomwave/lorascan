@@ -31,3 +31,31 @@ def test_submitter_token_is_created_once(tmp_path):
     p = str(tmp_path / "token")
     a = submitter_token(p); b = submitter_token(p)
     assert a == b and len(a) >= 16 and os.path.exists(p)
+
+import io, json
+from lorascan.share import endpoint_health
+
+class _Resp:
+    def __init__(self, code, body=b""): self.status = code; self._b = body
+    def read(self): return self._b
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+def test_endpoint_health_ok():
+    def opener(req, timeout=0):
+        if req.full_url.endswith("/healthz"): return _Resp(200, b"ok")
+        return _Resp(200, json.dumps({"latest": "2026-09-16T00"}).encode())
+    h = endpoint_health("https://x", opener=opener)
+    assert h["ok"] is True and h["status"] == 200 and h["watermark"] == "2026-09-16T00"
+
+def test_endpoint_health_unreachable():
+    def opener(req, timeout=0): raise OSError("connection refused")
+    h = endpoint_health("https://x", opener=opener)
+    assert h["ok"] is False and h["error"] and "refused" in h["error"]
+
+def test_endpoint_health_tolerates_non_dict_watermark():
+    def opener(req, timeout=0):
+        if req.full_url.endswith("/healthz"): return _Resp(200, b"ok")
+        return _Resp(200, b"[1,2,3]")
+    h = endpoint_health("https://x", opener=opener)
+    assert h["watermark"] is None and h["ok"] is True
