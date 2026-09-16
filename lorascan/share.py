@@ -190,9 +190,10 @@ def endpoint_health(base: str, timeout_s: float = 10.0, opener=None) -> dict:
         with opener(urllib.request.Request(f"{base}/v1/watermark"), timeout=timeout_s) as r:
             body = r.read()
         try:
-            out["watermark"] = (json.loads(body) or {}).get("latest")
+            wm = json.loads(body)
         except ValueError:
-            out["watermark"] = None
+            wm = None
+        out["watermark"] = wm.get("latest") if isinstance(wm, dict) else None
         out["ok"] = (out["status"] == 200)
     except (OSError, ValueError) as e:
         out["error"] = str(e)

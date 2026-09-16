@@ -52,3 +52,10 @@ def test_endpoint_health_unreachable():
     def opener(req, timeout=0): raise OSError("connection refused")
     h = endpoint_health("https://x", opener=opener)
     assert h["ok"] is False and h["error"] and "refused" in h["error"]
+
+def test_endpoint_health_tolerates_non_dict_watermark():
+    def opener(req, timeout=0):
+        if req.full_url.endswith("/healthz"): return _Resp(200, b"ok")
+        return _Resp(200, b"[1,2,3]")
+    h = endpoint_health("https://x", opener=opener)
+    assert h["watermark"] is None and h["ok"] is True
