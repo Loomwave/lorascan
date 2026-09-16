@@ -86,7 +86,7 @@ def run(w: Wizard) -> int:
 
 
 def _default_steps():
-    return [step_preflight, step_pins, step_validate]   # remaining Task-8 steps append here
+    return [step_preflight, step_pins, step_validate, step_location, step_upload, step_firstlight, step_write]
 
 
 def diagnose(probe_result, selftest_result) -> str:
@@ -166,3 +166,65 @@ def step_validate(w) -> StepResult:
     if not st.get("ok"):
         return StepResult(False, "the radio answered but the self-test failed.", diagnose(pr, st))
     return StepResult(True, "radio validated: probe GOOD, self-test PASS.")
+
+
+def step_location(w) -> StepResult:
+    if w.state.get("location"):
+        lat, lon = w.state["location"]
+        if w.io.confirm(f"Use the location from the daemon config ({lat:.4f},{lon:.4f})?"):
+            return StepResult(True, f"location set to {lat:.4f},{lon:.4f}.")
+    while True:
+        s = w.io.ask("Antenna location as lat,lon (blank to skip)", "")
+        if not s:
+            w.state.pop("location", None)
+            return StepResult(True, "no location set (your share will carry no location).")
+        try:
+            lat, lon = (float(x) for x in s.split(","))
+        except ValueError:
+            w.io.say("  format is lat,lon e.g. 33.89,-84.25"); continue
+        if -90 <= lat <= 90 and -180 <= lon <= 180:
+            w.state["location"] = (lat, lon)
+            return StepResult(True, f"location set to {lat:.4f},{lon:.4f}.")
+        w.io.say("  out of range: lat -90..90, lon -180..180")
+
+
+def step_upload(w) -> StepResult:
+    endpoint = w.io.ask("Community share endpoint", "https://share.lorascan.app")
+    h = w.runner.endpoint_health(endpoint)
+    if not h.get("ok"):
+        w.io.say(f"  endpoint not reachable: {h.get('error') or h.get('status')}")
+        return StepResult(True, "endpoint saved but not verified; you can upload later with `lorascan upload`.")
+    w.state["endpoint"] = endpoint
+    w.state.setdefault("granularity", "hour")
+    if w.state.get("db") and w.io.confirm("Do a first upload now to confirm data flows?"):
+        r = w.runner.first_upload(w.state["db"], w.state)
+        if r.get("ok"):
+            return StepResult(True, f"endpoint reachable; first upload accepted {r.get('accepted')} aggregates.")
+        return StepResult(True, "endpoint reachable; first upload did not complete — retry later with `lorascan upload`.")
+    return StepResult(True, "endpoint reachable and saved; upload after your first survey.")
+
+
+def step_firstlight(w) -> StepResult:
+    from .report.ascii import band_graph
+    try:
+        rows = w.runner.sweep(w.state["profile_path"])
+    except Exception as e:
+        return StepResult(True, f"(skipped the first-light graph: {e})")
+    if not rows:
+        return StepResult(True, "(no energy captured for the first-light graph)")
+    w.io.say(band_graph(rows))
+    return StepResult(True, "first light: the radio is hearing the band (above).")
+
+
+def step_write(w) -> StepResult:
+    from . import station_config as _sc
+    import os
+    prof = w.state.get("profile_path")
+    name = os.path.splitext(os.path.basename(prof))[0] if prof else None
+    cfg = _sc.StationConfig(profile=name, location=w.state.get("location"),
+                            endpoint=w.state.get("endpoint"), granularity=w.state.get("granularity", "hour"))
+    base = w.home if w.home is not None else os.path.expanduser("~")
+    path = _sc.save(cfg, path=os.path.join(base, ".config", "lorascan", "config.yaml"))
+    w.io.say(f"  wrote {path}")
+    w.io.say("  next: `lorascan scan survey --db site.db --duration 2h` then `lorascan share`")
+    return StepResult(True, "setup complete.")

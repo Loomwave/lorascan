@@ -1,5 +1,5 @@
 import os
-from lorascan import setup
+from lorascan import setup, station_config as sc
 
 def test_scripted_io_consumes_answers():
     io = setup.ScriptedIO(["yes", "2", "hello"])
@@ -51,3 +51,35 @@ def test_pins_import_from_meshtasticd(monkeypatch, tmp_path):
     w = setup.Wizard(io, R(), home=str(tmp_path))
     res = setup.step_pins(w)
     assert res.ok and os.path.exists(w.state["profile_path"])   # a real profile written under home
+
+def test_location_range_checked():
+    io = setup.ScriptedIO(["999,0", "33.9,-84.3"])   # first out of range, then valid
+    w = setup.Wizard(io, setup.Runner(), home="/tmp")
+    res = setup.step_location(w)
+    assert res.ok and w.state["location"] == (33.9, -84.3)
+
+def test_upload_verifies_and_sets_endpoint():
+    class R(setup.Runner):
+        def endpoint_health(self, url): return {"ok": True, "status": 200, "watermark": None}
+        def first_upload(self, db, cfg): return {"ok": True, "sent": 3, "accepted": 3}
+    io = setup.ScriptedIO(["", "yes"])               # default endpoint, opt in to first upload
+    w = setup.Wizard(io, R(), home="/tmp"); w.state["db"] = "x.db"
+    res = setup.step_upload(w)
+    assert res.ok and w.state["endpoint"].startswith("https://")
+
+def test_firstlight_draws_graph_from_sweep():
+    class R(setup.Runner):
+        def sweep(self, p): return [(915_000_000, -50), (920_000_000, -70)]
+    io = setup.ScriptedIO([])
+    w = setup.Wizard(io, R(), home="/tmp"); w.state["profile_path"] = "fake"
+    res = setup.step_firstlight(w)
+    assert res.ok and any("MHz" in m for m in io.said)
+
+def test_write_persists_config(tmp_path):
+    io = setup.ScriptedIO([])
+    w = setup.Wizard(io, setup.Runner(), home=str(tmp_path))
+    w.state.update(profile_path=str(tmp_path/".config/lorascan/profiles/manual.yaml"),
+                   location=(33.9, -84.3), endpoint="https://share.lorascan.app", granularity="hour")
+    res = setup.step_write(w)
+    got = sc.load(home=str(tmp_path))
+    assert res.ok and got.location == (33.9, -84.3) and got.endpoint == "https://share.lorascan.app"
