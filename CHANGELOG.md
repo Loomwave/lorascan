@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.1.25 — 2026-09-16
+- The auto-ranged band summary now carries the same "busy X% → Y%" legend (and a colour swatch) the 500 kHz ribbon prints, so on the community page a relatively-coloured band names the range it mapped to instead of leaving the reader to guess. `band_svg(auto_range=True)` only; the absolute-scale per-station report is unchanged.
 ## 0.1.24 — 2026-09-16
 - Community share page: a "Best 500 kHz slot (coordination grid)" section. When any submitter has scanned at 500 kHz bandwidth, the page ranks and draws the fixed `.250/.750` grid of 52 channels as a static ribbon (recommended channel ringed, exclusion-zone channels struck, hover for busy/floor), driven by the same `recommend_grid_slots` logic; when no one has, it shows how to populate it. Channel colours — and the band-summary strip — now **auto-range** to the data's actual busy spread, so a quiet band no longer renders every bar the same pale colour (`busy_colour` gained optional `vmin`/`vmax`; the per-station report is unchanged). The bulk-export endpoints (`/v1/dump.json`, `/v1/dump.csv`, from 0.1.22) are now documented in the share-server deploy README.
 ## 0.1.23 — 2026-09-16

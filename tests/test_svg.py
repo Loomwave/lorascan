@@ -138,3 +138,16 @@ def test_band_svg_auto_range_true_differs_from_default_for_low_narrow_values():
 def test_band_svg_auto_range_default_false_is_byte_identical_to_before():
     chans = [{"mhz": 902.0, "label": "", "floor_med": -110.0, "p90_med": -100.0, "peak_max": -80.0, "busy_mean": 0.4}]
     assert band_svg(chans) == band_svg(chans, auto_range=False)
+
+
+def test_band_svg_auto_range_shows_busy_legend():
+    # the community page auto-ranges band colours; the figure must name the range it mapped to,
+    # the same "busy X% -> Y%" legend the 500 kHz ribbon prints, so relative colour stays honest.
+    chans = [
+        {"mhz": 903.0, "floor_med": -118, "peak_max": -80, "busy_mean": 0.02, "p90_med": -100},
+        {"mhz": 911.0, "floor_med": -115, "peak_max": -70, "busy_mean": 0.12, "p90_med": -95},
+    ]
+    s = band_svg(chans, auto_range=True)
+    assert "busy 2% → 12%" in s
+    # absolute mode carries no such legend (unchanged per-station report)
+    assert "busy 2% → 12%" not in band_svg(chans, auto_range=False)
