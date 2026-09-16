@@ -442,7 +442,7 @@ def cmd_share(a) -> int:
     _cfg = _sc.load()
     to = _sc.resolve(a.to, _cfg.endpoint, None)
     cellarg = a.cell if a.cell is not None else (f"{_cfg.location[0]},{_cfg.location[1]}" if _cfg.location else None)
-    gran = _sc.resolve(getattr(a, "granularity", None), _cfg.granularity, "hour")
+    gran = _sc.resolve(a.granularity, _cfg.granularity, "hour")
     store = Store(a.db)
     cell = None
     if cellarg:
@@ -647,7 +647,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--cell", default=None, help="lat,lon of the antenna; rounded to --cell-size degrees (omit for no location)")
     sp.add_argument("--cell-size", type=float, default=DEFAULT_CELL_DEG); sp.add_argument("--rssi-offset", type=float, default=None)
     sp.add_argument("--token-path", default=os.path.expanduser("~/.config/lorascan/token")); sp.add_argument("--dry-run", action="store_true")
-    sp.add_argument("--granularity", choices=("hour", "day"), default="hour", help="aggregate per hour (~53 KB/day gzipped) or per day (~3 KB/day)")
+    sp.add_argument("--granularity", choices=("hour", "day"), default=None, help="aggregate per hour (~53 KB/day gzipped) or per day (~3 KB/day) (default: the station config's, else hour)")
     sp.add_argument("--budget", default=None, help="bytes per day of survey, e.g. 20k/day: picks the coarsest document that fits")
     sp.add_argument("--to", default=None, help="upload endpoint, e.g. https://share.lorascan.app (gzip, incremental; omit to only write the file)")
     sp.set_defaults(fn=cmd_share)

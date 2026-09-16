@@ -1,3 +1,4 @@
+import json
 import os
 from lorascan import cli, station_config as sc
 from lorascan.store.db import Store
@@ -73,3 +74,25 @@ def test_no_config_behaves_as_today(tmp_path, monkeypatch):
               "--dwell", "0.005", "--sample-gap", "0.001"])
     rc = cli.main(["share", "--db", db, "--out", str(tmp_path / "s.json")])  # no --to, no cfg
     assert rc == 0  # writes the file, uploads nothing, unchanged
+
+def test_share_uses_config_granularity_when_no_flag(tmp_path, monkeypatch):
+    home = _write_cfg(tmp_path, granularity="day")
+    monkeypatch.setenv("HOME", home)
+    db = str(tmp_path / "s.db")
+    cli.main(["scan", "quick", "--profile", "fake", "--db", db, "--passes", "1",
+              "--dwell", "0.005", "--sample-gap", "0.001"])
+    out = str(tmp_path / "s.json")
+    rc = cli.main(["share", "--db", db, "--out", out])  # no --granularity
+    assert rc == 0
+    assert json.load(open(out))["granularity"] == "day"
+
+def test_explicit_granularity_beats_config(tmp_path, monkeypatch):
+    home = _write_cfg(tmp_path, granularity="day")
+    monkeypatch.setenv("HOME", home)
+    db = str(tmp_path / "s.db")
+    cli.main(["scan", "quick", "--profile", "fake", "--db", db, "--passes", "1",
+              "--dwell", "0.005", "--sample-gap", "0.001"])
+    out = str(tmp_path / "s.json")
+    rc = cli.main(["share", "--db", db, "--out", out, "--granularity", "hour"])
+    assert rc == 0
+    assert json.load(open(out))["granularity"] == "hour"
