@@ -1,5 +1,5 @@
 import re
-from lorascan.report.svg import heatmap_svg, band_svg, sfmap_svg
+from lorascan.report.svg import heatmap_svg, band_svg, sfmap_svg, busy_colour, grid_ribbon_svg
 from lorascan.store.db import Store
 from lorascan.measure.energy import EnergyRow
 from lorascan.report.html import render_report
@@ -42,3 +42,80 @@ def test_heatmap_svg_caps_columns_by_merging_buckets():
     expected = sorted({sum((i % 2) for i in range(j, j + per)) / per for j in range(0, n, per)})
     assert expected == [0.4, 0.6] and set(nz[0]) == {0.4, 0.6} and nz[1] == [None] * 240
     assert busy_colour(0.4) in s and busy_colour(0.6) in s
+
+
+def test_busy_colour_absolute_path_is_unchanged_when_no_range_given():
+    assert busy_colour(0.5) == busy_colour(0.5)
+    assert busy_colour(None) == "#C9CFD6"
+    # two low, close absolute values come out nearly identical (the bug being fixed)
+    assert busy_colour(0.02) == busy_colour(0.02)
+
+
+def _rgb(hexcolour):
+    h = hexcolour.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _dist(a, b):
+    ra, rb = _rgb(a), _rgb(b)
+    return sum(abs(x - y) for x, y in zip(ra, rb))
+
+
+def test_busy_colour_auto_ranges_low_values_to_span_the_full_colour_scale():
+    low = busy_colour(0.02, 0.02, 0.12)
+    high = busy_colour(0.12, 0.02, 0.12)
+    assert low != high
+    absolute_low = busy_colour(0.02)
+    absolute_high = busy_colour(0.12)
+    # under the absolute 0..1 mapping these two low values are near-identical (the bug being fixed);
+    # under auto-ranging the SAME two values span (much closer to) the full colour scale
+    assert _dist(low, high) > 5 * _dist(absolute_low, absolute_high)
+    # the auto-ranged colour at vmin is the bottom stop, matching busy_colour(0.0) with no range
+    assert low == busy_colour(0.0)
+    assert high == busy_colour(1.0)
+
+
+def test_busy_colour_auto_range_guards_degenerate_vmax_le_vmin():
+    assert busy_colour(0.5, 0.3, 0.3) == busy_colour(0.0)
+    assert busy_colour(0.5, 0.3, 0.1) == busy_colour(0.0)
+
+
+def test_grid_ribbon_svg_empty_grid_returns_empty_string():
+    assert grid_ribbon_svg([]) == ""
+
+
+def test_grid_ribbon_svg_includes_recommended_channel_and_title():
+    grid = [
+        {"center_mhz": 902.25, "busy": None, "floor": None, "excluded": True, "recommended": False},
+        {"center_mhz": 903.75, "busy": None, "floor": None, "excluded": False, "recommended": False},
+        {"center_mhz": 911.75, "busy": 0.03, "floor": -119.0, "excluded": False, "recommended": True},
+        {"center_mhz": 926.75, "busy": None, "floor": None, "excluded": True, "recommended": False},
+    ]
+    s = grid_ribbon_svg(grid)
+    assert s.startswith("<svg") and "viewBox" in s
+    assert "911.75" in s
+    assert "<title>" in s
+    assert "902.25" in s and "excluded" in s          # excluded channel titled
+    assert "903.75" in s and "no 500 kHz data" in s    # no-data channel titled
+    assert "<script" not in s                          # community page is no-JS
+
+
+def test_grid_ribbon_svg_no_data_channels_get_neutral_fill_and_dont_crash():
+    grid = [{"center_mhz": 902.25, "busy": None, "floor": None, "excluded": False, "recommended": False}]
+    s = grid_ribbon_svg(grid)
+    assert "#C9CFD6" in s
+
+
+def test_band_svg_auto_range_true_differs_from_default_for_low_narrow_values():
+    chans = [{"mhz": 902.0, "label": "", "floor_med": -110.0, "p90_med": -100.0, "peak_max": -80.0, "busy_mean": 0.02},
+             {"mhz": 911.5, "label": "", "floor_med": -108.0, "p90_med": -100.0, "peak_max": -80.0, "busy_mean": 0.12}]
+    absolute = band_svg(chans)
+    ranged = band_svg(chans, auto_range=True)
+    assert absolute != ranged
+    assert busy_colour(0.02, 0.02, 0.12) in ranged
+    assert busy_colour(0.12, 0.02, 0.12) in ranged
+
+
+def test_band_svg_auto_range_default_false_is_byte_identical_to_before():
+    chans = [{"mhz": 902.0, "label": "", "floor_med": -110.0, "p90_med": -100.0, "peak_max": -80.0, "busy_mean": 0.4}]
+    assert band_svg(chans) == band_svg(chans, auto_range=False)

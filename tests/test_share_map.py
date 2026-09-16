@@ -1,5 +1,5 @@
 """First front end for share.lorascan.app: GET / (inline-SVG map page) and GET /v1/map.json (fleet aggregates)."""
-import json, threading, urllib.request
+import json, re, threading, urllib.request
 import pytest
 from lorascan.share_server import make_share_server
 from lorascan.share import build_share, upload_share
@@ -93,3 +93,40 @@ def test_map_page_shades_exclusions_and_ranks_viable_channels_first(fleet):
     q = html[html.index("Quietest channels, fleet-wide"):]
     assert q.index("911.500") < q.index("902.000") and "(excluded)" in q
     assert m["cells"][0]["quietest"][0]["mhz"] == 911.5 and m["cells"][0]["quietest"][-1]["excluded"] is True
+
+
+def _ingest_500khz_row(db, submitter="a" * 16, freq_hz=911_750_000, busy=0.03, floor=-119.0):
+    """Directly ingest one 500 kHz energy row (bypasses the HTTP/gzip roundtrip; ShareDB.ingest is the
+    same code path the share endpoint uses)."""
+    doc = {"format": "lorascan-share/2", "generated": "2026-09-16T00:00:00Z", "submitter": submitter,
+           "tool": "lorascan test", "board": "nebra-duo-hat", "granularity": "hour",
+           "calibration": "relative (uncalibrated)", "cell": None,
+           "energy": [{"freq_hz": freq_hz, "bw_hz": 500_000, "bucket": "2026-09-16T00:00Z", "bucket_s": 3600,
+                       "n_rows": 1, "n_samples": 100, "hours": 1.0, "floor_p10_med": floor,
+                       "p90_med": floor + 10.0, "peak_max": -80.0, "busy_mean": busy}],
+           "cad": [], "decode": []}
+    db.ingest(doc, 0)
+
+
+def test_map_page_shows_best_500khz_slot_grid_ribbon_when_data_present(tmp_path):
+    from lorascan.share_page import render_map_page, map_data
+    from lorascan.share_server import ShareDB
+    db = ShareDB(str(tmp_path / "grid.sqlite"))
+    _ingest_500khz_row(db)
+    m = map_data(db)
+    html = render_map_page(m)
+    assert "Best 500 kHz slot" in html
+    assert re.search(r"9\d\d\.(25|75)", html), "expected a grid centre ending .25 or .75 in the page"
+    assert "911.75" in html
+    assert "<script" not in html          # no located cells in this fixture -> no Leaflet enhancement either; page is pure static SVG
+
+
+def test_map_page_shows_no_500khz_data_note_when_absent(tmp_path):
+    from lorascan.share_page import render_map_page, map_data
+    from lorascan.share_server import ShareDB
+    db = ShareDB(str(tmp_path / "nogrid.sqlite"))
+    m = map_data(db)
+    m["band"] = [{"freq_hz": 902_000_000, "mhz": 902.0, "label": "", "floor_med": -110, "p90_med": -100, "peak_max": -80, "busy_mean": 0.1, "n_submitters": 1, "hours": 1, "excluded": False}]
+    html = render_map_page(m)
+    assert "Best 500 kHz slot" in html
+    assert "scanned at 500 kHz yet" in html
