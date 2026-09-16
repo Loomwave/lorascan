@@ -90,6 +90,25 @@ class Store:
                         "peak_max": d["peak_max"], "busy_mean": sum(d["busy"]) / len(d["busy"]), "n_rows": d["n_rows"], "n_samples": d["n_samples"]})
         return out
 
+    def channel_summary_by_bw(self, run_id: int | None = None, since: float | None = None) -> list[dict]:
+        """Like channel_summary but one row per (freq_hz, bw_hz), so 500 kHz-bandwidth energy is not blended
+        with the narrow measurements (the 500 kHz slot recommendation needs the width it will actually run)."""
+        w, a = self._where(run_id, since)
+        per: dict[tuple, dict] = {}
+        for f, fl, p90, pk, bf, n, bw in self.con.execute(
+                "SELECT freq_hz, floor_dbm, p90, peak, busy_frac, n, bw_hz FROM energy" + w, a):
+            d = per.setdefault((f, bw), {"freq_hz": f, "bw_hz": bw, "floors": [], "p90s": [],
+                                         "peak_max": -999.0, "busy": [], "n_rows": 0, "n_samples": 0})
+            d["floors"].append(fl); d["p90s"].append(p90); d["peak_max"] = max(d["peak_max"], pk)
+            d["busy"].append(bf); d["n_rows"] += 1; d["n_samples"] += n
+        out = []
+        for (f, bw) in sorted(per):
+            d = per[(f, bw)]; fl = sorted(d["floors"]); p9 = sorted(d["p90s"])
+            out.append({"freq_hz": f, "bw_hz": bw, "floor_med": fl[len(fl) // 2], "p90_med": p9[len(p9) // 2],
+                        "peak_max": d["peak_max"], "busy_mean": sum(d["busy"]) / len(d["busy"]),
+                        "n_rows": d["n_rows"], "n_samples": d["n_samples"]})
+        return out
+
     def time_buckets(self, bucket_s: int = 60, run_id: int | None = None, since: float | None = None) -> list[dict]:
         w, a = self._where(run_id, since)
         acc: dict[tuple, list] = {}

@@ -28,3 +28,20 @@ def test_runs_listed_and_span(tmp_path):
     s.add_energy(rid, row(5.0, 902_000_000, -110.0)); s.add_energy(rid, row(65.0, 902_000_000, -110.0))
     r = s.runs()[0]
     assert r["id"] == rid and r["kind"] == "quick" and r["first_ts"] == 5.0 and r["last_ts"] == 65.0 and r["n_rows"] == 2
+
+def _bw_row(freq, bw, floor, busy):
+    return EnergyRow(ts=1.0, freq_hz=freq, bw_hz=bw, engine="poll", n=10, hist=[0]*10,
+                     floor_dbm=floor, p50=floor+5, p90=floor+10, peak=floor+30, busy_frac=busy, discarded=0, dwell_s=1.0)
+
+def test_channel_summary_by_bw_splits_bandwidths(tmp_path):
+    st = Store(str(tmp_path / "s.db")); rid = st.new_run("survey", "fake", "")
+    # same frequency measured at 62.5 kHz (busy 0.5) and 500 kHz (busy 0.02)
+    st.add_energy(rid, _bw_row(915_000_000, 62_500, -110.0, 0.5))
+    st.add_energy(rid, _bw_row(915_000_000, 500_000, -119.0, 0.02))
+    rows = {(r["freq_hz"], r["bw_hz"]): r for r in st.channel_summary_by_bw()}
+    assert (915_000_000, 62_500) in rows and (915_000_000, 500_000) in rows
+    assert rows[(915_000_000, 500_000)]["busy_mean"] == 0.02
+    assert rows[(915_000_000, 500_000)]["floor_med"] == -119.0
+    assert rows[(915_000_000, 62_500)]["busy_mean"] == 0.5
+    # channel_summary (blended) still returns one row for the freq
+    assert len({c["freq_hz"] for c in st.channel_summary()}) == 1
