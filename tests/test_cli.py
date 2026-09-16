@@ -96,3 +96,24 @@ def test_explicit_granularity_beats_config(tmp_path, monkeypatch):
     rc = cli.main(["share", "--db", db, "--out", out, "--granularity", "hour"])
     assert rc == 0
     assert json.load(open(out))["granularity"] == "hour"
+
+def test_setup_subcommand_runs_with_injected_wizard(monkeypatch, tmp_path):
+    # End-to-end over the MANUAL pin path (real BoardProfile, no load_profile lookup), skipping
+    # step_preflight (host-specific; covered by its own unit test). Fake Runner so no hardware:
+    # manual pins -> validate GOOD -> skip location -> endpoint saved-not-verified -> first light -> write.
+    from lorascan import setup
+    class R(setup.Runner):
+        def probe(self, p): return {"verdict": "GOOD"}
+        def selftest(self, p): return {"ok": True}
+        def endpoint_health(self, u): return {"ok": False, "error": "offline in test"}
+        def sweep(self, p): return [(915_000_000, -55)]
+    def fake_build(a):
+        io = setup.ScriptedIO(["3", "kernel", "/dev/spidev0.0", "22", "23", "24", "", ""])
+        w = setup.Wizard(io, R(), home=str(tmp_path))
+        w._steps = setup._default_steps()[1:]   # drop step_preflight for this host-independent e2e
+        return w
+    monkeypatch.setattr("lorascan.cli._build_wizard", fake_build, raising=False)
+    rc = cli.main(["setup"])
+    assert rc == 0
+    from lorascan import station_config as sc
+    assert sc.load(home=str(tmp_path)).profile == "manual"

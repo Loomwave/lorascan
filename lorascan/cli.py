@@ -581,6 +581,60 @@ def cmd_upload(a) -> int:
     return _upload(doc, to)
 
 
+def _build_wizard(a):
+    from . import setup, autoconf, share
+    from .report.ascii import band_graph  # noqa: F401  (used via runner.sweep -> step)
+    class _CliRunner(setup.Runner):
+        def probe(self, profile):
+            prof = _profile(profile) if isinstance(profile, str) else profile
+            hal = open_hal(prof); r = Sx126x(hal, prof)
+            try:
+                return r.probe_bytes()
+            finally:
+                hal.close()
+        def selftest(self, profile):
+            prof = _profile(profile) if isinstance(profile, str) else profile
+            hal, radio = _open_radio(prof)
+            try:
+                row = polled_energy(radio, 911_500_000, 125, 0.2, sample_gap_s=0.01)
+                ok = row.n >= 5 and -126 < row.floor_dbm < -1
+                reason = "" if ok else ("floor-out-of-range" if row.n >= 5 else "init-timeout")
+                return {"ok": ok, "reason": reason}
+            finally:
+                hal.close()
+        def import_daemon(self, source, config):
+            return autoconf.resolve(source, config=config)
+        def endpoint_health(self, url):
+            return share.endpoint_health(url)
+        def first_upload(self, db, state):
+            st = Store(db); runs = st.runs()
+            pname = runs[-1]["profile"] if runs else "unknown"
+            cell = None
+            if state.get("location"):
+                cell = coarse_cell(state["location"][0], state["location"][1], DEFAULT_CELL_DEG)
+            doc = build_share(st, cell, submitter_token(), pname, 0.0, DEFAULT_CELL_DEG, None,
+                              granularity=state.get("granularity", "hour"))
+            r = upload_share(doc, state["endpoint"])
+            return {"ok": True, "sent": r["sent"], "accepted": r.get("accepted")}
+        def sweep(self, profile):
+            prof = _profile(profile) if isinstance(profile, str) else profile
+            hal, radio = _open_radio(prof)
+            rows = []
+            try:
+                for f in range(903_000_000, 927_000_000, 3_000_000):
+                    row = polled_energy(radio, f, 125, 0.1, sample_gap_s=0.01)
+                    rows.append((f, row.floor_dbm, row.peak_dbm))
+            finally:
+                hal.close()
+            return rows
+    return setup.Wizard(setup.TtyIO(), _CliRunner(), home=None)
+
+
+def cmd_setup(a) -> int:
+    from . import setup
+    return setup.run(_build_wizard(a))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="lorascan", description="LoRa-chipset band scanner for 902-928 MHz (receive-only)")
     p.add_argument("--version", action="version", version=__version__)
@@ -665,6 +719,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--sync-dwell", type=float, default=1.0, help="seconds per sync word"); sp.add_argument("--verbose", "-v", action="store_true"); sp.set_defaults(fn=cmd_syncfind)
     sp = sub.add_parser("upload", help="upload a share file written earlier (store-and-forward from any machine)")
     sp.add_argument("file"); sp.add_argument("--to", default=None, help="upload endpoint (default: the station config's share endpoint)"); sp.set_defaults(fn=cmd_upload)
+    sp = sub.add_parser("setup", help="guided first-run: validate pins, import a meshtasticd/openHOP config, set location, verify upload")
+    sp.add_argument("--db", default=None, help="an existing scan database to use for the first upload / first-light graph")
+    sp.set_defaults(fn=cmd_setup)
     return p
 
 
