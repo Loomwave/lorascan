@@ -223,11 +223,9 @@ def band_svg(channels: list, width: int = 1060, exclusions=None, auto_range: boo
         t += 2
     out.append(_txt(ml + pw / 2, mt + ph + 34, "MHz  (bar = floor to peak, tick = P90, colour = busy fraction)", 11, "middle"))
     if auto_range and vmin is not None:
-        # name the range the colour was mapped to, and a swatch — same legend the 500 kHz ribbon prints,
-        # so the relative colouring stays honest (a viewer can see 2%-here-green means the band's low end).
+        # name the range the colour was mapped to — text only, matching the 500 kHz ribbon's legend, so the
+        # relative colouring stays honest (a viewer sees the band's own low end is the green end of the scale).
         out.append(_txt(ml, 15, f"busy {vmin * 100:.0f}% → {vmax * 100:.0f}%  · colour auto-ranged", 11, "start", 'font-weight="700"'))
-        for k in range(7):
-            out.append(f'<rect x="{ml + 168 + k * 7:.1f}" y="8" width="7" height="8" fill="{busy_colour(k / 6.0)}"/>')
     out.append("</svg>")
     return "".join(out)
 

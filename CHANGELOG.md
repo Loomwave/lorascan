@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.1.26 — 2026-09-16
+- Fix: the auto-ranged band-summary legend on the community page had a colour swatch overlapping the word "auto-ranged". The legend is now text-only ("busy X% → Y% · colour auto-ranged"), matching the 500 kHz ribbon.
 ## 0.1.25 — 2026-09-16
 - The auto-ranged band summary now carries the same "busy X% → Y%" legend (and a colour swatch) the 500 kHz ribbon prints, so on the community page a relatively-coloured band names the range it mapped to instead of leaving the reader to guess. `band_svg(auto_range=True)` only; the absolute-scale per-station report is unchanged.
 ## 0.1.24 — 2026-09-16
