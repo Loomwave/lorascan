@@ -107,14 +107,25 @@ def diagnose(probe_result, selftest_result) -> str:
 def step_preflight(w) -> StepResult:
     import os, importlib.util
     blockers = []
-    if not any(os.path.exists(f"/dev/spidev{b}.{c}") for b in (0, 1) for c in (0, 1, 2)):
+    spidev_nodes = [f"/dev/spidev{b}.{c}" for b in (0, 1) for c in (0, 1, 2)]
+    present = [n for n in spidev_nodes if os.path.exists(n)]
+    if not present:
         blockers.append("SPI is not enabled: `sudo raspi-config nonint do_spi 0` then reboot "
                         "(or add `dtparam=spi=on` to /boot/firmware/config.txt).")
+    else:
+        inaccessible = [n for n in present if not os.access(n, os.R_OK | os.W_OK)]
+        if inaccessible:
+            blockers.append(f"no read/write access to {inaccessible[0]}: add yourself to the `spi` "
+                            f"group (`sudo usermod -aG spi $USER`), then log out and back in.")
+    gpiochip = "/dev/gpiochip0"
+    if os.path.exists(gpiochip) and not os.access(gpiochip, os.R_OK | os.W_OK):
+        blockers.append(f"no read/write access to {gpiochip}: add yourself to the `gpio` group "
+                        f"(`sudo usermod -aG gpio $USER`), then log out and back in.")
     for mod, apt in (("spidev", "python3-spidev"), ("gpiod", "python3-libgpiod")):
         if importlib.util.find_spec(mod) is None:
             blockers.append(f"the {mod} module is missing: `sudo apt install {apt}`.")
     if not blockers:
-        return StepResult(True, "host looks ready (SPI present, spidev + gpiod importable).")
+        return StepResult(True, "host looks ready (SPI present + accessible, spidev + gpiod importable).")
     for b in blockers:
         w.io.say("  - " + b)
     return StepResult(False, "host is not ready yet.", "\n".join(blockers))

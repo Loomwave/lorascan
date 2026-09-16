@@ -1,4 +1,5 @@
 import os
+import importlib.util
 from lorascan import setup, station_config as sc
 
 def test_scripted_io_consumes_answers():
@@ -82,6 +83,60 @@ def test_firstlight_draws_graph_from_sweep():
     w = setup.Wizard(io, R(), home="/tmp"); w.state["profile_path"] = "fake"
     res = setup.step_firstlight(w)
     assert res.ok and any("MHz" in m for m in io.said)
+
+def test_preflight_flags_spi_not_enabled(monkeypatch):
+    # no /dev/spidev* node at all -> the "enable SPI" blocker, not a permission blocker
+    monkeypatch.setattr(os.path, "exists", lambda path: False)
+    monkeypatch.setattr(os, "access", lambda path, mode: True)
+    monkeypatch.setattr(importlib.util, "find_spec", lambda mod: object())
+    io = setup.ScriptedIO([])
+    w = setup.Wizard(io, setup.Runner(), home="/tmp")
+    res = setup.step_preflight(w)
+    assert res.ok is False
+    assert "SPI is not enabled" in res.detail
+    assert "usermod" not in res.detail
+
+def test_preflight_flags_missing_spi_group(monkeypatch):
+    # spidev0.0 exists but is not readable/writable -> a spi-group blocker, not "not enabled"
+    def fake_exists(path):
+        return path in ("/dev/spidev0.0", "/dev/gpiochip0")
+    def fake_access(path, mode):
+        return path != "/dev/spidev0.0"
+    monkeypatch.setattr(os.path, "exists", fake_exists)
+    monkeypatch.setattr(os, "access", fake_access)
+    monkeypatch.setattr(importlib.util, "find_spec", lambda mod: object())
+    io = setup.ScriptedIO([])
+    w = setup.Wizard(io, setup.Runner(), home="/tmp")
+    res = setup.step_preflight(w)
+    assert res.ok is False
+    assert "spi" in res.detail
+    assert "usermod" in res.detail
+    assert "SPI is not enabled" not in res.detail
+
+def test_preflight_flags_missing_gpio_group(monkeypatch):
+    # spidev0.0 present + accessible, but /dev/gpiochip0 present and not accessible
+    def fake_exists(path):
+        return path in ("/dev/spidev0.0", "/dev/gpiochip0")
+    def fake_access(path, mode):
+        return path != "/dev/gpiochip0"
+    monkeypatch.setattr(os.path, "exists", fake_exists)
+    monkeypatch.setattr(os, "access", fake_access)
+    monkeypatch.setattr(importlib.util, "find_spec", lambda mod: object())
+    io = setup.ScriptedIO([])
+    w = setup.Wizard(io, setup.Runner(), home="/tmp")
+    res = setup.step_preflight(w)
+    assert res.ok is False
+    assert "gpio" in res.detail
+    assert "gpiochip0" in res.detail
+
+def test_preflight_ok_when_present_accessible_importable(monkeypatch):
+    monkeypatch.setattr(os.path, "exists", lambda path: True)
+    monkeypatch.setattr(os, "access", lambda path, mode: True)
+    monkeypatch.setattr(importlib.util, "find_spec", lambda mod: object())
+    io = setup.ScriptedIO([])
+    w = setup.Wizard(io, setup.Runner(), home="/tmp")
+    res = setup.step_preflight(w)
+    assert res.ok is True
 
 def test_write_persists_config(tmp_path):
     io = setup.ScriptedIO([])
