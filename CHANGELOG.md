@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.20 — 2026-09-16
+- Guided setup: `lorascan setup` walks a new user from a bare install to an uploading station — it checks SPI is enabled and that the spidev/gpiod deps and the device permissions are in place, imports the radio pins from a running/installed meshtasticd or openHOP config (or a shipped profile, or manual entry), validates the wiring with probe + selftest and explains any failure in plain language, sets the station location, verifies the community share endpoint and does a first upload, and prints an ASCII band graph so the radio is visibly hearing the band. It writes `~/.config/lorascan/config.yaml`, which `scan`/`share`/`upload` now read by default, so the daily commands need no flags (an explicit flag still wins; with no config file the behaviour is unchanged). Also in this release: a software-driven chip-select — a GPIO `nss` pin — now works on a single-radio host (the wiring meshtasticd and many hand-wired HATs use), where P1 refused it; and the README now leads with the guided setup, with the manual wiring/import steps kept below as details.
+
 ## 0.1.19 — 2026-09-15
 - Hotfix 2: the map page (`lorascan-share-server` GET /, since 0.1.13) nested an f-string that reused its enclosing quote — also Python 3.12-only — so a self-hosted server on Debian 12 raised SyntaxError. Fixed. The suite's static check now walks the 3.12 tokenizer's f-string tokens (catches both shipped forms), and the release script refuses to publish unless the package compiles on the bench's Python 3.11.
 
