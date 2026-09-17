@@ -1,8 +1,7 @@
 # Deploying the lorascan share endpoint (share.lorascan.app)
 
 Handover for the cluster operator. The service is `lorascan-share-server` from the lorascan wheel
-(reference implementation of `docs/superpowers/specs/2026-09-14-lorascan-share-endpoint.md` in the Loomwave
-repo): stdlib Python, one process, SQLite in `/data/share.sqlite`, routes `GET /` (the community map page, inline SVG, no JS/CDN), `GET /v1/map.json`,
+(reference implementation of `docs/superpowers/specs/2026-09-14-lorascan-share-endpoint.md`): stdlib Python, one process, SQLite in `/data/share.sqlite`, routes `GET /` (the community map page, inline SVG, no JS/CDN), `GET /v1/map.json`,
 `GET /v1/dump.json`, `GET /v1/dump.csv`, `GET /healthz`, `GET /v1/watermark`, `POST /v1/share`, `GET /v1/stats`. It has no TLS of its own: terminate TLS at the ingress.
 
 ## Steps

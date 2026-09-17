@@ -5,7 +5,7 @@ the same silicon a deployment will run on — to measure interference the way th
 experience it, and turns days of measurements into a long-term spectrum heat map, a band summary,
 and (later phases) LoRa-specific presence maps, network identification and candidate-channel tests.
 
-Design: `docs/superpowers/specs/2026-09-14-lorascan-design.md` (the Loomwave repo). This directory is
+Design: `docs/superpowers/specs/2026-09-14-lorascan-design.md`. This directory is
 phase 1 (P1): energy layer, quick and survey scans, SQLite store, HTML report, spidev/gpiod radios.
 
 ## Install (Debian 12 / Raspberry Pi OS)
@@ -203,8 +203,8 @@ another SF in the same window and the band summary for a peak near the top of th
 The community endpoint is a small stdlib server in this package: `lorascan-share-server --db /data/share.sqlite --port 8081`
 (routes `/` = the community map page, `/v1/map.json`, `/healthz`, `/v1/watermark`, `/v1/share`, `/v1/stats`; idempotent upserts; 4 MB gzip / 64 MB inflated / 60 POST per
 hour per submitter; miscalibrated documents stored flagged). `deploy/share-server/` has a Dockerfile, a Kubernetes manifest,
-a systemd unit and the handover README; the protocol is documented in the Loomwave repo
-(`docs/superpowers/specs/2026-09-14-lorascan-share-endpoint.md`). A regional group can run one for itself; the public one is
+a systemd unit and the handover README; the protocol is documented in
+`docs/superpowers/specs/2026-09-14-lorascan-share-endpoint.md`. A regional group can run one for itself; the public one is
 share.lorascan.app.
 
 ## Exclusion zones (what is measured but never recommended)
