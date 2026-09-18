@@ -29,7 +29,7 @@ from .exclusions import parse_exclusions
 from .networks import presets_on
 from .store.db import Store
 from .report.html import render_report
-from .share import build_share, write_share, coarse_cell, submitter_token, DEFAULT_CELL_DEG, SHARE_FORMAT, choose_by_budget, parse_budget, upload_share, gzip_bytes
+from .share import build_share, write_share, coarse_cell, submitter_token, DEFAULT_CELL_DEG, SHARE_FORMAT, choose_by_budget, parse_budget, upload_share, gzip_bytes, share_view_url
 
 
 def _profile(name: str) -> BoardProfile:
@@ -491,6 +491,7 @@ def cmd_share(a) -> int:
 def _upload(doc: dict, to: str) -> int:
     r = upload_share(doc, to)
     print(f"[share] uploaded to {to}: sent {r['sent']} energy aggregates ({r['bytes']} bytes gzipped), skipped {r['skipped']} already at the endpoint (watermark {r['watermark']}), accepted {r.get('accepted')}, attempts {r['attempts']}")
+    print(f"[share] view: {share_view_url(to)}  (the community map — your cell appears after the next refresh; bulk data: /v1/dump.json, /v1/dump.csv)")
     return 0
 
 
@@ -657,7 +658,8 @@ def cmd_setup(a) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="lorascan", description="LoRa-chipset band scanner for 902-928 MHz (receive-only)")
+    p = argparse.ArgumentParser(prog="lorascan", description="LoRa-chipset band scanner for 902-928 MHz (receive-only)",
+                                epilog="Results from every station that shares are on the community map at https://share.lorascan.app/ (heat map, band summary, best 500 kHz slot; bulk export at /v1/dump.json and /v1/dump.csv). Upload yours with `lorascan share --to https://share.lorascan.app` or `lorascan setup`.")
     p.add_argument("--version", action="version", version=__version__)
     sub = p.add_subparsers(dest="cmd", required=True)
 

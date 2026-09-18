@@ -7,6 +7,7 @@ gzip JSON incrementally — it asks the endpoint for its watermark first and sen
 after it (inclusive, so a still-filling bucket is updated); rows are idempotent on
 (submitter, freq_hz, bw_hz, bucket_s, bucket). Protocol: docs/superpowers/specs/2026-09-14-lorascan-share-endpoint.md"""
 from __future__ import annotations
+import re
 import datetime as dt
 import json
 import os
@@ -198,3 +199,13 @@ def endpoint_health(base: str, timeout_s: float = 10.0, opener=None) -> dict:
     except (OSError, ValueError) as e:
         out["error"] = str(e)
     return out
+
+
+def share_view_url(to: str) -> str:
+    """Where a human sees what an upload produced: the community map at the endpoint's root.
+    `--to` may be the bare host, or end in /v1/share (the POST route) — either way the map is at "/"."""
+    to = (to or "").strip()
+    if not to:
+        return ""
+    to = re.sub(r"/v1/share/?$", "", to).rstrip("/")
+    return to + "/"

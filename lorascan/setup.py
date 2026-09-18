@@ -207,6 +207,7 @@ def step_upload(w) -> StepResult:
         w.state["endpoint"] = endpoint
         return StepResult(True, "endpoint saved but not verified; you can upload later with `lorascan upload`.")
     w.state["endpoint"] = endpoint
+    w.io.say(f"  uploads are published on the community map at {endpoint.rstrip('/')}/ (your cell appears after the next refresh)")
     w.state.setdefault("granularity", "hour")
     if w.state.get("db") and w.io.confirm("Do a first upload now to confirm data flows?"):
         r = w.runner.first_upload(w.state["db"], w.state)

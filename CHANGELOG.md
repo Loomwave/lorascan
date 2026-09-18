@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.28 — 2026-09-18
+
+- Point people at the results: the README gains a "The community map (share.lorascan.app)" section (what is
+  there, how to upload, the `/v1/dump.json` / `/v1/dump.csv` bulk exports) and drops the stale "endpoint is being
+  deployed" line; `share` / `upload` / `auto` print a `view: https://…/` line after a successful upload;
+  `lorascan --help` names the map; the HTML report links to it; `setup` says where uploads are published.
+  New helper `share.share_view_url(to)`.
+
 ## 0.1.27 — 2026-09-16
 - The auto-ranged band-summary and 500 kHz-ribbon legends show the colour-scale gradient swatch again, laid out to the LEFT of the "busy X% → Y%" text so swatch and label no longer overlap. (0.1.26 dropped the swatch to fix the overlap; this restores it, positioned.) A test now guards the swatch against silent removal.
 ## 0.1.26 — 2026-09-16
