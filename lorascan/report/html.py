@@ -153,6 +153,7 @@ table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;fon
 <h2>Quietest channels</h2>
 <table><thead><tr><th>MHz</th><th>who lives here</th><th>busy %</th><th>floor dBm</th><th>P90 dBm</th><th>peak dBm</th><th>rows</th><th>decoded</th></tr></thead><tbody>{quiet_rows}</tbody></table>
 <div class="note">Levels are {calibration}. Busy threshold and floor definition: floor = P10 of the dwell's samples, busy = samples above floor + 8 dB (lorascan defaults).</div>
+<div class="note">Compare with every shared station on the community map: <a href="https://share.lorascan.app/">share.lorascan.app</a> (heat map, band summary, best 500 kHz slot). Publish this survey there with <code>lorascan share --db your.db --cell lat,lon --to https://share.lorascan.app</code>.</div>
 <script id="lorascan-data" type="application/json">{data_json}</script>
 <div id="plotly-note">interactive charts: loading plotly.js from cdnjs… (the static charts above work offline)</div>
 <script src="{plotly}"></script>

@@ -28,6 +28,15 @@ clean per-user install on a Pi whose system Python is externally managed (PEP 66
 then `pipx install --system-site-packages https://github.com/Loomwave/lorascan/releases/download/v0.1.19/lorascan-0.1.19-py3-none-any.whl`
 (`--system-site-packages` so the apt-installed spidev/gpiod modules are visible).
 
+## The community map (share.lorascan.app)
+
+Every station that shares feeds one public page: **https://share.lorascan.app/** — a heat map of the whole band,
+the band summary (busy % per channel, auto-ranged), and the **best 500 kHz slot** ribbon on the `.250/.750` grid,
+all aggregated per cell. Nothing there identifies a station beyond its cell. To put your survey on it, run
+`lorascan setup` once (it asks for the endpoint) or `lorascan share --db your.db --cell lat,lon --to https://share.lorascan.app`
+after a scan; `auto` shares for you with `--to`. Want the raw aggregates? `https://share.lorascan.app/v1/dump.json`
+and `/v1/dump.csv` are the bulk exports (unflagged energy rows, with bandwidth).
+
 ## Setup (recommended)
 
 New here? Run the guided setup — it checks your SPI/pin wiring, can import the radio
@@ -132,8 +141,8 @@ incremental and idempotent: `share --to URL` first asks the endpoint which bucke
 token and sends only that bucket and later ones, so a dropped link costs one small retry, never a re-send of the
 run. `--budget 20k/day` picks the coarsest document that fits (hour → day → day without the CAD/decode tables).
 A site with no uplink at all writes the file and uploads it later from any machine: `lorascan upload FILE --to URL`
-(the submitter token is inside the file). The community endpoint (share.lorascan.app) is being deployed; until it is
-live, `share` without `--to` just writes the file. Protocol: docs/superpowers/specs/2026-09-14-lorascan-share-endpoint.md
+(the submitter token is inside the file). The community endpoint is live at https://share.lorascan.app — see
+"The community map" above. `share` without `--to` just writes the file. Protocol: docs/superpowers/specs/2026-09-14-lorascan-share-endpoint.md
 Add `--mqtt mqtt://[user:pass@]broker[:1883][/prefix]` to any scan to publish every row to a broker as it is measured
 (needs `paho-mqtt`): `<prefix>/energy/<MHz>` per visit (floor/P50/P90/peak dBm, busy fraction, engine, n; no histogram),
 `<prefix>/cad/<MHz>/sf<SF>` per CAD sweep, `<prefix>/decode/<MHz>/<network>` per decode dwell (counts only),
