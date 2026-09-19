@@ -9,7 +9,8 @@
   busy), `--dry-run`, `--db` — and the result is saved as the same station config the wizard writes.
   It is idempotent: the same flags print `setup: unchanged (<path>)` and exit 0 without touching the radio,
   the daemon config or the network; a flag that moves a value prints `setup: updated <field>…` and rewrites
-  the config (only a new or missing board profile re-runs the radio steps); a first run prints
+  the config (the radio steps re-run only for a new or missing board profile, or when `--from` now names
+  a different daemon than the `auto-<daemon>` profile the config holds); a first run prints
   `setup: written <path>`. Exit codes: 0 ok/unchanged/dry-run, 1 a step failed (summary + diagnosis on
   stderr, never a retry loop without a TTY), 2 a missing flag or a bad value, named:
   `lorascan: setup --non-interactive needs --cell (asked: "…")`. The guided wizard is unchanged;

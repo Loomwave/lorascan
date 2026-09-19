@@ -34,7 +34,8 @@ class CountingRunner(setup.Runner):
 
     def import_daemon(self, source, config):
         self.calls.append("import_daemon")
-        prof = BoardProfile(name="auto-openhop", bus_type="spidev", bus_dev="/dev/spidev0.0",
+        # autoconf names an imported profile auto-<source> (resolve_meshtasticd / resolve_openhop)
+        prof = BoardProfile(name="auto-" + source, bus_type="spidev", bus_dev="/dev/spidev0.0",
                             bus_hz=2_000_000,
                             pins={"nss": 8, "reset": 22, "busy": 23, "dio1": 24,
                                   "rxen": None, "txen": None})
@@ -243,3 +244,34 @@ def test_config_without_from_exits_2(tmp_path, monkeypatch, capsys):
                                    "--profile", "generic-spidev", "--config", "/etc/x.yaml", "--skip-radio"])
     err = capsys.readouterr().err
     assert rc == 2 and "--config" in err and r.calls == []
+
+
+def _mesh_argv(tmp_path, *extra):
+    cfg = tmp_path / "meshtasticd.yaml"
+    cfg.write_text("Lora: {}\n", encoding="utf-8")
+    return ["-d", str(tmp_path), "setup", "--non-interactive", "--from", "meshtasticd",
+            "--config", str(cfg), "--endpoint", "http://x"] + list(extra)
+
+
+def test_switching_daemon_reimports_the_profile(tmp_path, monkeypatch, capsys):
+    """An openHOP station pointed at meshtasticd must import the new daemon's pins, not report
+    "unchanged" because some profile file happens to be on disk."""
+    _preflight_ok(monkeypatch)
+    assert _run_cli(monkeypatch, CountingRunner(location=(33.9, -84.3, "cfg")),
+                    _cfg_argv(tmp_path)) == 0                       # --from openhop
+    capsys.readouterr()
+    assert sc.load().profile == "auto-openhop"
+
+    second = CountingRunner(location=(33.9, -84.3, "cfg"))
+    rc = _run_cli(monkeypatch, second, _mesh_argv(tmp_path))
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert second.calls.count("import_daemon") == 1
+    assert "setup: updated profile" in out
+    assert sc.load().profile == "auto-meshtasticd"
+    assert (tmp_path / "profiles" / "auto-meshtasticd.yaml").exists()
+
+    third = CountingRunner(location=(33.9, -84.3, "cfg"))           # and it settles back down
+    assert _run_cli(monkeypatch, third, _mesh_argv(tmp_path)) == 0
+    assert third.calls == []
+    assert "setup: unchanged" in capsys.readouterr().out

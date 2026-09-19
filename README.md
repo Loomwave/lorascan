@@ -92,9 +92,12 @@ Hand-wired pins have no flags: use `--from` or `--profile`, or run the wizard on
   (`setup: updated location, endpoint`). Only a new/missing board profile re-runs the radio steps;
 * no config yet → the steps run and `setup: written /data/lorascan/config.yaml`.
 
-The pins are only re-read from the daemon config when the board profile is new or missing, so a
-boot run costs nothing; after changing the pins in openHOP/meshtasticd, delete
-`/data/lorascan/profiles/auto-openhop.yaml` (or run the wizard) to import them again.
+The pins are re-read from the daemon config when the board profile is new or missing, or when you
+point `--from` at a different daemon (an imported profile is named `auto-<daemon>`, so a station on
+`auto-openhop` run with `--from meshtasticd` re-imports and reports `setup: updated profile`).
+A boot run with the same `--from` therefore costs nothing; after changing the pins *inside*
+openHOP/meshtasticd, delete `/data/lorascan/profiles/auto-openhop.yaml` (or run the wizard) to
+import them again.
 
 Exit codes: **0** configured, unchanged, or a dry run · **1** a step failed (the radio did not
 answer, the host is not ready) — the summary and the diagnosis go to stderr · **2** a needed flag

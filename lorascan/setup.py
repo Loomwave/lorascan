@@ -403,6 +403,15 @@ def plan(existing, flags: Flags, home=None):
         if name != profile:
             profile = name
             changed.append("profile")
+    elif flags.source:
+        # An imported profile is always named auto-<source> (autoconf.resolve_meshtasticd /
+        # resolve_openhop), so the name the import WOULD produce is known without running it:
+        # that is what makes switching daemons (--from openhop -> --from meshtasticd) count as a
+        # change, while a re-run with the same --from still costs no import_daemon call.
+        name = "auto-" + flags.source
+        if name != profile:
+            profile = name
+            changed.append("profile")
     location = existing.location
     cell, given = _parse_cell(flags.cell)
     if given and cell != location:
@@ -443,8 +452,8 @@ def _say_dry_run(io, cfg_path, existing, have, target, changed, flags) -> None:
     fields = (("profile", target.profile, existing.profile), ("location", target.location, existing.location),
               ("endpoint", target.endpoint, existing.endpoint), ("granularity", target.granularity, existing.granularity))
     for name, now, before in fields:
-        if name == "profile" and "profile" in changed and not flags.profile:
-            shown = "(imported from the {0} config)".format(flags.source or "daemon")
+        if name == "profile" and "profile" in changed and flags.source:
+            shown = "{0} (imported from the {1} config)".format(_fmt(now), flags.source)
         else:
             shown = _fmt(now)
         if not have:
