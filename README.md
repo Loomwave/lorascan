@@ -54,6 +54,62 @@ lorascan scan survey --db site.db --duration 2h
 lorascan share
 ```
 
+### Unattended setup (cron / balena): `--non-interactive`
+
+A repeater that images itself has nobody to answer the wizard. `--non-interactive` takes every
+answer from a flag instead — run it from a cron job, a balena start script or a systemd
+`ExecStartPre=`, before openHOP or meshtasticd starts:
+
+```
+lorascan -d /data/lorascan setup --non-interactive \
+    --from openhop --config /etc/openhop_repeater/config.yaml \
+    --cell 33.89,-84.25
+```
+
+Whatever the daemon config can supply (the pins, and its location if it has one) is read from it;
+anything it cannot is a flag, and the result is saved as the station config exactly as the wizard
+would have written it. The guided wizard is unchanged — without `--non-interactive` nothing
+about `lorascan setup` behaves differently.
+
+| flag | what it answers |
+| --- | --- |
+| `--from meshtasticd\|openhop` + `--config PATH` | the radio pins (and the location, if the config has one). `--config` may be omitted for the daemon's own default path |
+| `--profile NAME_OR_PATH` | a shipped board profile instead of `--from`, e.g. `--profile nebra-duo-hat` |
+| `--cell LAT,LON` | the antenna location. Overrides the daemon's; `--cell none` for a station that deliberately shares no location |
+| `--endpoint URL` | the community share endpoint (default `https://share.lorascan.app`, or the one already in the config) |
+| `--granularity hour\|day` | share aggregation (default `hour`) |
+| `--skip-radio` | skip the host preflight, probe, self-test and first-light sweep — for a boot script that runs while the radio is still busy. The summary says so; run `lorascan selftest` later |
+| `--dry-run` | print the config that would be written and how it differs from the current one; write nothing |
+| `--db PATH` | an existing scan database to use for the first upload |
+
+Hand-wired pins have no flags: use `--from` or `--profile`, or run the wizard once by hand.
+
+**It is idempotent**, so it is safe on every boot:
+
+* same flags as last time → `setup: unchanged (/data/lorascan/config.yaml)`, exit 0, **without
+  touching the radio, the daemon config or the network**;
+* a flag that moves a value → the config is updated and the changed fields are named
+  (`setup: updated location, endpoint`). Only a new/missing board profile re-runs the radio steps;
+* no config yet → the steps run and `setup: written /data/lorascan/config.yaml`.
+
+The pins are re-read from the daemon config when the board profile is new or missing, or when you
+point `--from` at a different daemon (an imported profile is named `auto-<daemon>`, so a station on
+`auto-openhop` run with `--from meshtasticd` re-imports and reports `setup: updated profile`).
+A boot run with the same `--from` therefore costs nothing; after changing the pins *inside*
+openHOP/meshtasticd, delete `/data/lorascan/profiles/auto-openhop.yaml` (or run the wizard) to
+import them again.
+
+Exit codes: **0** configured, unchanged, or a dry run · **1** a step failed (the radio did not
+answer, the host is not ready) — the summary and the diagnosis go to stderr · **2** a needed flag
+is missing or a value is bad, naming the flag: `lorascan: setup --non-interactive needs --cell
+(asked: "Antenna location as lat,lon (blank to skip)")`.
+
+In a systemd unit, as a one-liner before the scanner starts:
+
+```
+ExecStartPre=/usr/bin/lorascan -d /data/lorascan setup --non-interactive --from openhop --config /etc/openhop_repeater/config.yaml --cell 33.89,-84.25 --skip-radio
+```
+
 ### Read-only hosts / balena: `-d DIR`
 
 Some hosts mount the root filesystem read-only and give you exactly one writable directory — a

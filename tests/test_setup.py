@@ -53,6 +53,24 @@ def test_pins_import_from_meshtasticd(monkeypatch, tmp_path):
     res = setup.step_pins(w)
     assert res.ok and os.path.exists(w.state["profile_path"])   # a real profile written under home
 
+def test_pins_normalises_a_daemon_location_3_tuple(tmp_path):
+    """autoconf reports location as (lat, lon, "where it came from"); step_location unpacks two."""
+    from types import SimpleNamespace
+    from lorascan.profile import BoardProfile
+    class R(setup.Runner):
+        def import_daemon(self, source, config):
+            prof = BoardProfile(name="auto-openhop", bus_type="spidev", bus_dev="/dev/spidev0.0",
+                                bus_hz=2_000_000, pins={"nss": 8, "reset": 22, "busy": 23, "dio1": 24,
+                                                        "rxen": None, "txen": None})
+            return SimpleNamespace(profile=prof, location=(33.89, -84.25, "openhop config gps.location"))
+    io = setup.ScriptedIO(["1", "openhop", "", "yes"])   # import, source, default config, keep the location
+    w = setup.Wizard(io, R(), home=str(tmp_path))
+    assert setup.step_pins(w).ok
+    assert w.state["location"] == (33.89, -84.25)        # the 3rd item is dropped here...
+    res = setup.step_location(w)                          # ...so this no longer fails to unpack
+    assert res.ok and "33.8900,-84.2500" in res.summary
+
+
 def test_location_range_checked():
     io = setup.ScriptedIO(["999,0", "33.9,-84.3"])   # first out of range, then valid
     w = setup.Wizard(io, setup.Runner(), home="/tmp")
