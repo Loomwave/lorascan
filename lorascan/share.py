@@ -16,12 +16,20 @@ import gzip
 import time
 import urllib.request
 import urllib.error
+import sys
 from . import __version__
+from . import paths
 
 SHARE_FORMAT = "lorascan-share/2"
 GRANULARITY_S = {"hour": 3600, "day": 86400}
 DEFAULT_CELL_DEG = 0.1
-TOKEN_PATH = os.path.expanduser("~/.config/lorascan/token")
+
+
+def __getattr__(name):
+    """TOKEN_PATH used to be an import-time constant; -d/--data-dir is applied after import (#22)."""
+    if name == "TOKEN_PATH":
+        return paths.token_path()
+    raise AttributeError(name)
 
 
 def coarse_cell(lat: float | None, lon: float | None, size_deg: float = DEFAULT_CELL_DEG) -> tuple[float, float] | None:
@@ -31,14 +39,30 @@ def coarse_cell(lat: float | None, lon: float | None, size_deg: float = DEFAULT_
     return round(round(lat * q) / q, 6), round(round(lon * q) / q, 6)
 
 
-def submitter_token(path: str = TOKEN_PATH) -> str:
-    """A random id generated on first share (no account); deleting the file revokes it."""
-    if os.path.exists(path):
-        with open(path) as f:
-            t = f.read().strip()
+_said_legacy_token = False
+
+
+def submitter_token(path: str | None = None) -> str:
+    """A random id generated on first share (no account); deleting the file revokes it.
+
+    With no --token-path the file lives in the data dir (-d/--data-dir) or ~/.config/lorascan.
+    A station adopting -d keeps its identity: a token only at the legacy path is read from there
+    (and said so, once) rather than a new one being minted (#22)."""
+    global _said_legacy_token
+    explicit = path is not None
+    path = path or paths.token_path()
+    candidates = [path] if explicit else paths.token_paths()
+    for i, c in enumerate(candidates):
+        if os.path.exists(c):
+            with open(c) as f:
+                t = f.read().strip()
             if t:
+                if i and not _said_legacy_token:
+                    _said_legacy_token = True
+                    print(f"[share] using the submitter token already at {c} (outside the data dir); "
+                          f"move it to {path} to keep everything in one place", file=sys.stderr)
                 return t
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    paths.for_output(path)
     t = secrets.token_hex(16)
     with open(path, "w") as f:
         f.write(t + "\n")

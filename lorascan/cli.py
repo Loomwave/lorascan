@@ -9,6 +9,7 @@ import sys
 import time
 
 from . import __version__
+from . import paths
 from .profile import load_profile, BoardProfile, dump_profile
 import dataclasses
 from .hal import open_hal, HalError
@@ -110,7 +111,7 @@ def _run_scan(a, kind: str) -> int:
     if prof_name == "generic-spidev":                 # the argparse default = "not chosen"
         prof_name = _sc.load().profile or prof_name
     prof = _profile(prof_name)
-    store = Store(a.db)
+    store = Store(paths.for_output(a.db))
     if prof.bus_type == "fake":
         a.fake_clock = True          # a simulated radio never sleeps; drive its time from a fake clock
     fake_clock = [0.0]
@@ -328,7 +329,7 @@ def cmd_calibrate(a) -> int:
         hal.close()
     offset = round(a.level - row.p50, 1)
     newp = dataclasses.replace(prof, name=prof.name + "-calibrated", rssi_offset_db=offset)
-    out = a.out or (prof.name + "-calibrated.yaml")
+    out = paths.for_output(a.out or paths.default_output(prof.name + "-calibrated.yaml"))
     with open(out, "w") as f:
         f.write(dump_profile(newp, f"calibrated {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}: known level {a.level} dBm at {a.freq} MHz read as p50 {row.p50} dBm (n={row.n})"))
     print(f"[calibrate] measured p50 {row.p50:.1f} dBm for a known {a.level:.1f} dBm input -> rssi_offset_db {offset:+.1f}; wrote {out}")
@@ -366,6 +367,7 @@ def cmd_status(a) -> int:
 def cmd_report(a) -> int:
     from .report.html import render_report_from_share, build_data_from_share, build_data, write_svgs
     zones = [] if a.no_exclude else parse_exclusions(a.exclude)
+    paths.for_output(a.out)
     if a.from_share:
         with open(a.from_share) as f:
             doc = json.load(f)
@@ -417,6 +419,7 @@ def cmd_export(a) -> int:
     --csv X.csv writes energy to X.csv, CAD to X-cad.csv and decodes to X-decode.csv (side files
     only when the table has rows); --table picks one table and writes it to --csv exactly."""
     store = Store(a.db)
+    paths.for_output(a.csv)
     stem, ext = os.path.splitext(a.csv)
     ext = ext or ".csv"
     tables = {
@@ -479,7 +482,7 @@ def cmd_share(a) -> int:
         print(f"[share] budget {a.budget}: chose granularity={doc['granularity']} tables={'energy' + (',cad,decode' if doc['cad'] or doc['decode'] else '')} ({size} bytes gzipped for the whole span)")
     else:
         doc = build_share(store, cell, token, profile_name, offset, a.cell_size, a.run, granularity=gran)
-    write_share(doc, a.out)
+    write_share(doc, paths.for_output(a.out))
     print(f"[share] wrote {a.out}: {len(doc['energy'])} energy aggregates ({doc['granularity']}), {len(doc['cad'])} CAD rows, {len(doc['decode'])} decode rows, cell={doc['cell']}; {len(gzip_bytes(doc))} bytes gzipped")
     if a.dry_run or not to:
         if not a.dry_run:
@@ -505,11 +508,13 @@ def cmd_auto(a) -> int:
         tail = tail[1:]
     plan = tail[0] if tail and tail[0] in ("quick", "survey", "watch", "test") else "survey"
     rest = tail[1:] if tail and tail[0] == plan else tail
-    prof_path = a.profile_out or os.path.join(os.path.expanduser("~/.config/lorascan/profiles"), f"{r.profile.name}.yaml")
+    prof_path = a.profile_out or os.path.join(paths.profiles_dir(), f"{r.profile.name}.yaml")
+    dd = paths.data_dir()
+    pre = ["-d", dd] if dd else []
     dev = r.device
     if r.usb and r.profile.bus_type == "ch341":
         dev = A.usb_node(*r.usb) or ""
-    scan_argv = ["scan", plan, "--profile", prof_path] + rest
+    scan_argv = pre + ["scan", plan, "--profile", prof_path] + rest
     print(f"[auto] source: {r.source}")
     print(f"[auto] radio: {r.profile.bus_type} {r.profile.bus_dev} pins {r.profile.pins}" + (f" usb {r.usb[0]:04x}:{r.usb[1]:04x}" if r.usb else "") + (f" (daemon max power {r.hint_max_power} dBm; lorascan never transmits)" if r.hint_max_power else ""))
     print(f"[auto] would stop {r.service}, verify {dev or 'the USB device'} is free, run: lorascan {' '.join(scan_argv)}, then restore {r.service}")
@@ -522,7 +527,7 @@ def cmd_auto(a) -> int:
     if a.dry_run:
         print("[auto] dry run: nothing stopped, nothing written")
         return 0
-    os.makedirs(os.path.dirname(prof_path), exist_ok=True)
+    paths.for_output(prof_path)
     with open(prof_path, "w") as f:
         f.write(dump_profile(r.profile, f"auto-configured from {r.source} ({a.source}) by lorascan auto"))
     print(f"[auto] wrote profile {prof_path}")
@@ -534,9 +539,9 @@ def cmd_auto(a) -> int:
     if result["rc"] != 0:
         return result["rc"]
     if a.to:
-        db = rest[rest.index("--db") + 1] if "--db" in rest else "lorascan.db"
+        db = rest[rest.index("--db") + 1] if "--db" in rest else paths.default_output("lorascan.db")
         cell = a.cell or (f"{r.location[0]},{r.location[1]}" if r.location else None)
-        share_argv = ["share", "--db", db, "--out", a.share_out, "--to", a.to] + (["--cell", cell] if cell else []) + ["--granularity", a.granularity]
+        share_argv = pre + ["share", "--db", db, "--out", a.share_out, "--to", a.to] + (["--cell", cell] if cell else []) + ["--granularity", a.granularity]
         print(f"[auto] sharing: lorascan {' '.join(share_argv)}" + (f" (location from {r.location[2]})" if cell and not a.cell and r.location else ""))
         return main(share_argv)
     return 0
@@ -548,7 +553,7 @@ def cmd_syncfind(a) -> int:
     prof = _profile(a.profile)
     syncs = parse_syncs(a.syncs)
     freq = int(round(a.freq * 1e6))
-    store = Store(a.db)
+    store = Store(paths.for_output(a.db))
     run_id = store.new_run("syncfind", prof.name, f"{a.freq} MHz sf{a.sf} bw{a.bw} cr{a.cr} {len(syncs)} syncs x {a.sync_dwell} s")
     hal, radio = _open_radio(prof, freq)
     fake = prof.bus_type == "fake"
@@ -661,7 +666,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="lorascan", description="LoRa-chipset band scanner for 902-928 MHz (receive-only)",
                                 epilog="Results from every station that shares are on the community map at https://share.lorascan.app/ (heat map, band summary, best 500 kHz slot; bulk export at /v1/dump.json and /v1/dump.csv). Upload yours with `lorascan share --to https://share.lorascan.app` or `lorascan setup`.")
     p.add_argument("--version", action="version", version=__version__)
+    p.add_argument("-d", "--data-dir", default=None, metavar="DIR",
+                   help="keep the config, board profiles, network table, share token and every default-named output file in DIR "
+                        "(subfolders created as needed) — for hosts with a read-only rootfs, e.g. a balena repeater where only "
+                        "/data is writable: `lorascan -d /data/lorascan scan quick`. A path you pass explicitly is still used as "
+                        "given. Also settable with the LORASCAN_DIR environment variable (handy in a systemd unit).")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    def db_arg(sp):
+        sp.add_argument("--db", default=None, help="scan database (default: lorascan.db, under --data-dir when set)")
+        sp.set_defaults(_db_default="lorascan.db")          # resolved in _resolve_paths, after -d is applied
 
     def radio_args(sp):
         sp.add_argument("--profile", default="generic-spidev", help="board profile name or path ('fake' = simulated radio)")
@@ -674,7 +688,7 @@ def build_parser() -> argparse.ArgumentParser:
     plans = {"quick": ssub, "survey": ssub, "watch": ssub, "test": sub}
     for kind, parent in plans.items():
         sp = parent.add_parser(kind, help={"quick": "whole band, < 1 h", "survey": "continuous, adaptive revisit", "watch": "fixed channel list, all layers, high time resolution", "test": "candidate frequencies + LoRa settings -> report card"}[kind]); radio_args(sp)
-        sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--note", default="")
+        db_arg(sp); sp.add_argument("--note", default="")
         sp.add_argument("--cad", action="store_true", help="quick/survey: add CAD sweeps on hot + known channels")
         sp.add_argument("--cad-n", type=int, default=50, help="CADs per sweep")
         sp.add_argument("--sfs", default=None, help="CAD spreading factors, e.g. 7,9,11")
@@ -688,7 +702,7 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--start", type=int, default=902_000_000); sp.add_argument("--stop", type=int, default=928_000_000); sp.add_argument("--step", type=int, default=200_000)
         sp.add_argument("--bw", default="125", help="measurement bandwidth kHz (62/125/250/500), or a list 62,125,250,500 measured back to back per channel")
         sp.add_argument("--cad-grid", type=int, default=None, help="quick/survey: CAD-sweep the whole band once per round on windows this wide (Hz, e.g. 500000) at every --sfs x --bws")
-        sp.add_argument("--networks", default=None, help="user network table (default ~/.config/lorascan/networks.yaml or /etc/lorascan/networks.yaml if present)")
+        sp.add_argument("--networks", default=None, help="user network table (default: networks.yaml under --data-dir when set, else ~/.config/lorascan/networks.yaml or /etc/lorascan/networks.yaml if present)")
         sp.add_argument("--busy-t", type=float, default=8.0, help="busy threshold dB above floor")
         sp.add_argument("--engine", choices=("poll", "scan"), default="poll", help="poll = host-polled GetRssiInst; scan = on-chip histogram (Semtech scan patch, experimental)")
         sp.add_argument("--nb-scan", type=int, default=None, help="samples per on-chip scan (engine=scan); default = dwell / 8.2 us, max 65535")
@@ -705,10 +719,10 @@ def build_parser() -> argparse.ArgumentParser:
         sp.set_defaults(fn=lambda a, k=kind: _run_scan(a, k))
     sp = sub.add_parser("calibrate", help="turn a known input level into rssi_offset_db in a copy of the profile"); radio_args(sp)
     sp.add_argument("--level", type=float, required=True, help="known input level at the antenna port, dBm"); sp.add_argument("--freq", type=float, default=915.0, help="MHz")
-    sp.add_argument("--bw", type=int, default=125); sp.add_argument("--out", default=None); sp.set_defaults(fn=cmd_calibrate, dwell=2.0)
-    sp = sub.add_parser("serve", help="live web page of a database (for a running survey)"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--host", default="0.0.0.0"); sp.add_argument("--port", type=int, default=8080); sp.add_argument("--refresh", type=int, default=60); sp.set_defaults(fn=cmd_serve)
-    sp = sub.add_parser("status", help="runs, row counts and last-row age in a database"); sp.add_argument("--db", default="lorascan.db"); sp.set_defaults(fn=cmd_status)
-    sp = sub.add_parser("report"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--out", default="lorascan-report.html"); sp.add_argument("--title", default="lorascan report")
+    sp.add_argument("--bw", type=int, default=125); sp.add_argument("--out", default=None, help="where to write the calibrated profile (default: <profile>-calibrated.yaml, under --data-dir when set)"); sp.set_defaults(fn=cmd_calibrate, dwell=2.0)
+    sp = sub.add_parser("serve", help="live web page of a database (for a running survey)"); db_arg(sp); sp.add_argument("--host", default="0.0.0.0"); sp.add_argument("--port", type=int, default=8080); sp.add_argument("--refresh", type=int, default=60); sp.set_defaults(fn=cmd_serve)
+    sp = sub.add_parser("status", help="runs, row counts and last-row age in a database"); db_arg(sp); sp.set_defaults(fn=cmd_status)
+    sp = sub.add_parser("report"); db_arg(sp); sp.add_argument("--out", default=None, help="report file (default: lorascan-report.html, under --data-dir when set)"); sp.set_defaults(_out_default="lorascan-report.html"); sp.add_argument("--title", default="lorascan report")
     sp.add_argument("--run", type=int, default=None); sp.add_argument("--since", default=None, help="only the last e.g. 6h / 2d"); sp.add_argument("--bucket", type=int, default=None, help="heat map bucket seconds (default: auto, <= 600 columns)"); sp.add_argument("--rssi-offset", type=float, default=None)
     sp.add_argument("--slot", type=int, default=None, help="add an N Hz slot table (e.g. 500000): worst case per window, best first")
     sp.add_argument("--exclude", default=None, help="MHz zones measured but never recommended, e.g. 902.0-903.25,926.75-928.0 (the default: band edges + 33 cm repeater segments)")
@@ -718,15 +732,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--recommend-bw", type=int, default=500_000, help="print/show the best slot at this bandwidth in Hz (0 disables)")
     sp.add_argument("--recommend-grid", action="store_true", help="align the 500 kHz recommendation to the fixed MeshCore-500 .250/.750 channel grid instead of a free window")
     sp.set_defaults(fn=cmd_report)
-    sp = sub.add_parser("export", help="CSV: energy to --csv, CAD to <stem>-cad.csv, decodes to <stem>-decode.csv (or one table with --table)"); sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--csv", required=True); sp.add_argument("--run", type=int, default=None)
+    sp = sub.add_parser("export", help="CSV: energy to --csv, CAD to <stem>-cad.csv, decodes to <stem>-decode.csv (or one table with --table)"); db_arg(sp); sp.add_argument("--csv", required=True); sp.add_argument("--run", type=int, default=None)
     sp.add_argument("--table", choices=("all", "energy", "cad", "decode", "slots"), default="all", help="one table to --csv exactly, or all (default); slots = the N kHz window view")
     sp.add_argument("--slot", type=int, default=None, help="window width Hz for --table slots (default 500000)")
     sp.add_argument("--exclude", default=None, help="MHz zones never recommended, e.g. 902.0-903.25,926.75-928.0 (the default)"); sp.add_argument("--no-exclude", action="store_true"); sp.set_defaults(fn=cmd_export)
     sp = sub.add_parser("share", help="write the opt-in community share file (aggregates + coarse cell; no upload yet)")
-    sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--out", default="lorascan-share.json"); sp.add_argument("--run", type=int, default=None)
+    db_arg(sp); sp.add_argument("--out", default=None, help="share file (default: lorascan-share.json, under --data-dir when set)"); sp.set_defaults(_out_default="lorascan-share.json"); sp.add_argument("--run", type=int, default=None)
     sp.add_argument("--cell", default=None, help="lat,lon of the antenna; rounded to --cell-size degrees (omit for no location)")
     sp.add_argument("--cell-size", type=float, default=DEFAULT_CELL_DEG); sp.add_argument("--rssi-offset", type=float, default=None)
-    sp.add_argument("--token-path", default=os.path.expanduser("~/.config/lorascan/token")); sp.add_argument("--dry-run", action="store_true")
+    sp.add_argument("--token-path", default=None, help="submitter token file (default: token under --data-dir when set, else ~/.config/lorascan/token)"); sp.add_argument("--dry-run", action="store_true")
     sp.add_argument("--granularity", choices=("hour", "day"), default=None, help="aggregate per hour (~53 KB/day gzipped) or per day (~3 KB/day) (default: the station config's, else hour)")
     sp.add_argument("--budget", default=None, help="bytes per day of survey, e.g. 20k/day: picks the coarsest document that fits")
     sp.add_argument("--to", default=None, help="upload endpoint, e.g. https://share.lorascan.app (gzip, incremental; omit to only write the file)")
@@ -734,13 +748,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("auto", help="configure from a running meshtasticd / openHOP daemon: read its radio config, stop that unit, scan, restore it, share")
     sp.add_argument("--from", dest="source", required=True, choices=("meshtasticd", "openhop")); sp.add_argument("--config", default=None, help="the daemon config to use (a config.d board file for meshtasticd; required when several boards are active)")
     sp.add_argument("--root", default=None, help=argparse.SUPPRESS); sp.add_argument("--dry-run", action="store_true", help="print the resolved profile, the scan command and the unit that would be stopped; touch nothing")
-    sp.add_argument("--profile-out", default=None, help="where to write the resolved profile (default ~/.config/lorascan/profiles/<name>.yaml)")
+    sp.add_argument("--profile-out", default=None, help="where to write the resolved profile (default: profiles/<name>.yaml under --data-dir when set, else ~/.config/lorascan/profiles/<name>.yaml)")
     sp.add_argument("--to", default=None, help="share endpoint to upload to after the scan"); sp.add_argument("--cell", default=None, help="lat,lon for the share (default: the daemon's config location if any)")
-    sp.add_argument("--granularity", choices=("hour", "day"), default="day"); sp.add_argument("--share-out", default="lorascan-share.json")
+    sp.add_argument("--granularity", choices=("hour", "day"), default="day"); sp.add_argument("--share-out", default=None, help="share file to write after the scan (default: lorascan-share.json, under --data-dir when set)"); sp.set_defaults(_share_out_default="lorascan-share.json")
     sp.add_argument("scan_args", nargs=argparse.REMAINDER, help="-- then the plan and its options, e.g. -- survey --db x.db --duration 2h --cad-grid 500000")
     sp.set_defaults(fn=cmd_auto)
     sp = sub.add_parser("syncfind", help="sweep 8-bit sync words at one freq/SF/BW/CR and report the ones that decode (names an undocumented LoRa net)"); radio_args(sp)
-    sp.add_argument("--db", default="lorascan.db"); sp.add_argument("--freq", type=float, required=True, help="MHz"); sp.add_argument("--sf", type=int, required=True); sp.add_argument("--bw", type=int, default=125)
+    db_arg(sp); sp.add_argument("--freq", type=float, required=True, help="MHz"); sp.add_argument("--sf", type=int, required=True); sp.add_argument("--bw", type=int, default=125)
     sp.add_argument("--cr", type=int, default=5); sp.add_argument("--preamble", type=int, default=8); sp.add_argument("--syncs", default=None, help="e.g. 0x12,0x34 or 0x00-0x7F (default all 256)")
     sp.add_argument("--sync-dwell", type=float, default=1.0, help="seconds per sync word"); sp.add_argument("--verbose", "-v", action="store_true"); sp.set_defaults(fn=cmd_syncfind)
     sp = sub.add_parser("upload", help="upload a share file written earlier (store-and-forward from any machine)")
@@ -751,8 +765,22 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _resolve_paths(a) -> None:
+    """Loomwave/lorascan#22: a file argument left at its default moves under --data-dir; one the
+    user passed is used exactly as given (relative to the current directory, as before).
+
+    Only arguments whose sub-parser declared a `_<name>_default` take part, so an option that is
+    genuinely optional when absent (`setup --db`, an existing database) keeps its None."""
+    for attr in ("db", "out", "share_out"):
+        name = getattr(a, "_" + attr + "_default", None)
+        if name and getattr(a, attr, "") is None:
+            setattr(a, attr, paths.default_output(name))
+
+
 def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
+    paths.set_data_dir(a.data_dir)          # before dispatch: every path below is resolved through it
+    _resolve_paths(a)
     try:
         return int(a.fn(a))
     except (HalError, DeviceBusy, DeviceError, SxError, FileNotFoundError, ValueError, RuntimeError, AutoConfError) as e:

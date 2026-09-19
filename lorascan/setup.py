@@ -133,6 +133,7 @@ def step_preflight(w) -> StepResult:
 
 def step_pins(w) -> StepResult:
     from .profile import load_profile, dump_profile, BoardProfile
+    from . import paths
     import os
     choice = w.io.choose("Where should the radio pin settings come from?",
                          ["Import from meshtasticd or openHOP",
@@ -158,9 +159,7 @@ def step_pins(w) -> StepResult:
                                   "reset": int(w.io.ask("reset", "22")), "busy": int(w.io.ask("busy", "23")),
                                   "dio1": int(w.io.ask("dio1", "24")),
                                   "rxen": None, "txen": None})
-    base = w.home if w.home is not None else os.path.expanduser("~")
-    pdir = os.path.join(base, ".config", "lorascan", "profiles")
-    os.makedirs(pdir, exist_ok=True)
+    pdir = paths.ensure_dir(paths.profiles_dir(w.home))      # <data dir>/profiles under -d, else ~/.config/lorascan/profiles
     path = os.path.join(pdir, f"{prof.name}.yaml")
     with open(path, "w", encoding="utf-8") as f:
         f.write(dump_profile(prof, "written by lorascan setup"))
@@ -231,13 +230,19 @@ def step_firstlight(w) -> StepResult:
 
 def step_write(w) -> StepResult:
     from . import station_config as _sc
+    from . import paths
     import os
     prof = w.state.get("profile_path")
     name = os.path.splitext(os.path.basename(prof))[0] if prof else None
     cfg = _sc.StationConfig(profile=name, location=w.state.get("location"),
                             endpoint=w.state.get("endpoint"), granularity=w.state.get("granularity", "hour"))
-    base = w.home if w.home is not None else os.path.expanduser("~")
-    path = _sc.save(cfg, path=os.path.join(base, ".config", "lorascan", "config.yaml"))
+    path = _sc.save(cfg, path=paths.config_path(w.home))
     w.io.say(f"  wrote {path}")
-    w.io.say("  next: `lorascan scan survey --db site.db --duration 2h` then `lorascan share`")
-    return StepResult(True, "setup complete.")
+    d = paths.data_dir()
+    if d:
+        w.io.say(f"  everything lorascan reads and writes lives in {d} — keep passing -d {d} (or set LORASCAN_DIR={d})")
+        w.io.say(f"  next: `lorascan -d {d} scan survey --duration 2h` then `lorascan -d {d} share`")
+    else:
+        w.io.say(f"  config and profiles are in {os.path.dirname(path)} (use -d DIR to keep them, and every output, somewhere else)")
+        w.io.say("  next: `lorascan scan survey --db site.db --duration 2h` then `lorascan share`")
+    return StepResult(True, f"setup complete; config and profiles are in {os.path.dirname(path)}.")

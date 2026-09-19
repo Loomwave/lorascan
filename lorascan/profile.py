@@ -6,11 +6,20 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
-PROFILE_DIRS = [
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "profiles"),          # shipped with the package
-    os.path.expanduser("~/.config/lorascan/profiles"),
-    "/etc/lorascan/profiles",
-]
+from . import paths
+
+
+def profile_dirs() -> list:
+    """Where a bare profile name is looked up, best first: the profiles shipped with the package,
+    then <data dir>/profiles (-d/--data-dir), ~/.config/lorascan/profiles and /etc/lorascan/profiles."""
+    return paths.profile_dirs()
+
+
+def __getattr__(name):
+    """PROFILE_DIRS used to be an import-time constant; -d/--data-dir is applied after import (#22)."""
+    if name == "PROFILE_DIRS":
+        return profile_dirs()
+    raise AttributeError(name)
 
 
 def _scalar(tok: str) -> Any:
@@ -116,18 +125,19 @@ class BoardProfile:
 
 
 def load_profile(name_or_path: str) -> BoardProfile:
-    """A path (contains '/' or ends with .yaml) is read directly; a bare name is looked up in PROFILE_DIRS."""
+    """A path (contains '/' or ends with .yaml) is read directly; a bare name is looked up in profile_dirs()."""
     candidates = []
+    dirs = profile_dirs()
     if "/" in name_or_path or name_or_path.endswith((".yaml", ".yml")):
         candidates.append(name_or_path)
     else:
-        for d in PROFILE_DIRS:
+        for d in dirs:
             candidates.append(os.path.join(d, name_or_path + ".yaml"))
     for c in candidates:
         if os.path.isfile(c):
             with open(c) as f:
                 return BoardProfile.from_dict(parse_mini_yaml(f.read()))
-    raise FileNotFoundError(f"profile {name_or_path!r} not found; searched profiles dirs: {', '.join(PROFILE_DIRS)}")
+    raise FileNotFoundError(f"profile {name_or_path!r} not found; searched profiles dirs: {', '.join(dirs)}")
 
 
 def _y(v) -> str:

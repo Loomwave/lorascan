@@ -1,12 +1,20 @@
-"""The persistent station config (~/.config/lorascan/config.yaml, then /etc/lorascan/config.yaml).
-Written by `lorascan setup`; read by scan/share/upload when a flag is absent. Mini-YAML, no deps."""
+"""The persistent station config (~/.config/lorascan/config.yaml, then /etc/lorascan/config.yaml,
+or <data dir>/config.yaml under `-d/--data-dir`). Written by `lorascan setup`; read by
+scan/share/upload when a flag is absent. Mini-YAML, no deps."""
 from __future__ import annotations
 import os
 from dataclasses import dataclass
+from . import paths
 from .profile import parse_mini_yaml
 
-USER_PATH = "~/.config/lorascan/config.yaml"
 ETC_PATH = "/etc/lorascan/config.yaml"
+
+
+def __getattr__(name):
+    """USER_PATH used to be an import-time constant; -d/--data-dir is applied after import (#22)."""
+    if name == "USER_PATH":
+        return paths.config_path()
+    raise AttributeError(name)
 
 
 @dataclass
@@ -17,9 +25,9 @@ class StationConfig:
     granularity: str | None = None
 
 
-def _user_path(home: str | None) -> str:
-    base = home if home is not None else os.path.expanduser("~")
-    return os.path.join(base, ".config", "lorascan", "config.yaml")
+def _user_path(home: str | None = None) -> str:
+    """Where `save` writes: the data dir when -d/--data-dir or LORASCAN_DIR is set, else under home."""
+    return paths.config_path(home)
 
 
 def _from_dict(d: dict) -> StationConfig:
@@ -47,15 +55,17 @@ def _load_file(path: str) -> StationConfig:
 
 
 def load(home: str | None = None) -> StationConfig:
-    for path in (_user_path(home), ETC_PATH):
+    """Read the first config that exists: the data dir, then ~/.config/lorascan, then /etc (#22 —
+    a station that adopts -d keeps reading the config it already had until it is re-written)."""
+    for path in paths.config_paths(home):
         if os.path.exists(path):
             return _load_file(path)
     return StationConfig()
 
 
 def save(cfg: StationConfig, path: str | None = None) -> str:
-    path = path or os.path.expanduser(USER_PATH)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    path = path or _user_path()
+    paths.for_output(path)
     lines = ["# written by `lorascan setup`; hand-editable"]
     if cfg.profile:
         lines.append(f"profile: {cfg.profile}")
