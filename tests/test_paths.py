@@ -254,3 +254,28 @@ def test_auto_writes_its_profile_into_the_data_dir_and_passes_d_down(tmp_path, h
     assert rc == 0
     assert str(d / "profiles") in out and "-d " + str(d) + " scan survey" in out
     assert str(home) not in out                     # nothing points back at ~/.config/lorascan
+
+
+def test_unwritable_data_dir_is_a_clean_error_not_a_traceback(tmp_path, capsys):
+    # The feature's own target: a DIR that cannot be created. A path *under a file* makes makedirs
+    # raise an OSError (NotADirectoryError) even when the tests run as root, standing in for the
+    # PermissionError a read-only rootfs raises. A WRITING command must report `lorascan: ...`, rc != 0.
+    from lorascan import cli
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    rc = cli.main(["-d", str(blocker / "sub"), "scan", "quick", "--profile", "fake", "--duration", "1s"])
+    err = capsys.readouterr().err
+    assert rc != 0
+    assert err.startswith("lorascan: "), err
+    assert "Traceback" not in err
+
+
+def test_reading_a_missing_data_dir_is_a_clean_error_too(tmp_path, capsys):
+    # A read-only command against a data dir that does not exist: sqlite cannot open the database;
+    # that too is one clean line, not an OperationalError traceback.
+    from lorascan import cli
+    rc = cli.main(["-d", str(tmp_path / "nope" / "deeper"), "status"])
+    err = capsys.readouterr().err
+    assert rc != 0
+    assert err.startswith("lorascan: "), err
+    assert "Traceback" not in err

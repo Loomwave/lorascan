@@ -5,6 +5,7 @@ import csv
 import json
 import os
 import signal
+import sqlite3
 import sys
 import time
 
@@ -783,7 +784,9 @@ def main(argv=None) -> int:
     _resolve_paths(a)
     try:
         return int(a.fn(a))
-    except (HalError, DeviceBusy, DeviceError, SxError, FileNotFoundError, ValueError, RuntimeError, AutoConfError) as e:
+    except (HalError, DeviceBusy, DeviceError, SxError, OSError, sqlite3.OperationalError, ValueError, RuntimeError, AutoConfError) as e:
+        # OSError covers FileNotFoundError and the PermissionError/NotADirectoryError a read-only
+        # rootfs raises when --data-dir cannot be created (#22) — a clean line, never a traceback.
         print(f"lorascan: {e}", file=sys.stderr)
         return 1
 
