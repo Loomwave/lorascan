@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.30 — 2026-09-19
+
+- `lorascan setup --non-interactive` (#25): first-run setup from a cron job, a balena start script or a
+  systemd `ExecStartPre=`, before openHOP/meshtasticd starts. Every wizard answer comes from a flag —
+  `--from meshtasticd|openhop` + `--config PATH` (or `--profile NAME`), `--cell LAT,LON`, `--endpoint URL`,
+  `--granularity hour|day`, `--skip-radio` (no preflight/probe/self-test/first light while the radio is
+  busy), `--dry-run`, `--db` — and the result is saved as the same station config the wizard writes.
+  It is idempotent: the same flags print `setup: unchanged (<path>)` and exit 0 without touching the radio,
+  the daemon config or the network; a flag that moves a value prints `setup: updated <field>…` and rewrites
+  the config (only a new or missing board profile re-runs the radio steps); a first run prints
+  `setup: written <path>`. Exit codes: 0 ok/unchanged/dry-run, 1 a step failed (summary + diagnosis on
+  stderr, never a retry loop without a TTY), 2 a missing flag or a bad value, named:
+  `lorascan: setup --non-interactive needs --cell (asked: "…")`. The guided wizard is unchanged;
+  `--non-interactive` is opt-in.
+- Fix: a location imported from a daemon config carries a third "where it came from" item, which the
+  wizard's location step could not unpack — `setup` now normalises it to (lat, lon).
+
 ## 0.1.29 — 2026-09-19
 
 - One option for read-only hosts (#22): `lorascan -d DIR …` (or `LORASCAN_DIR=DIR`) keeps the station

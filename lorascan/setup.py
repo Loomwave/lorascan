@@ -145,8 +145,9 @@ def step_pins(w) -> StepResult:
         config = w.io.ask("Config path (blank for the default)", "") or None
         resolved = w.runner.import_daemon(source, config)
         prof = resolved.profile
-        if getattr(resolved, "location", None):
-            w.state["location"] = resolved.location
+        loc = getattr(resolved, "location", None)
+        if loc:
+            w.state["location"] = (float(loc[0]), float(loc[1]))   # autoconf carries a 3rd "where from" item
     elif choice == 1:
         name = w.io.ask("Profile name (generic-spidev / nebra-duo-hat / meshtoad-v3-ch341)", "generic-spidev")
         prof = load_profile(name)
@@ -246,3 +247,264 @@ def step_write(w) -> StepResult:
         w.io.say(f"  config and profiles are in {os.path.dirname(path)} (use -d DIR to keep them, and every output, somewhere else)")
         w.io.say("  next: `lorascan scan survey --db site.db --duration 2h` then `lorascan share`")
     return StepResult(True, f"setup complete; config and profiles are in {os.path.dirname(path)}.")
+
+
+# --------------------------------------------------------------------------------------------
+# Non-interactive setup (Loomwave/lorascan#25): the same steps, every answer from a flag.
+#
+# For a cron job or a balena start script that must configure a station before openHOP starts:
+# anything the daemon config cannot supply is passed as a flag and saved as the station config.
+# Re-running is safe — same flags means "unchanged", exit 0, without touching the radio or the
+# network; a flag that moves a value updates the config; the guided wizard is untouched.
+
+DEFAULT_ENDPOINT = "https://share.lorascan.app"
+
+
+class SetupNeedsInput(Exception):
+    """A wizard prompt that no flag answers. `--non-interactive` stops here (exit 2) rather than
+    silently accepting the wizard's default."""
+    def __init__(self, prompt, flag):
+        super().__init__('setup --non-interactive needs {0} (asked: "{1}")'.format(flag, prompt))
+        self.prompt = prompt
+        self.flag = flag
+
+
+class SetupBadFlag(ValueError):
+    """A flag value the wizard rejected (an unparsable/out-of-range --cell). Exit 2, no retry loop."""
+
+
+@dataclass
+class Flags:
+    """The `setup --non-interactive` flags, as parsed by the CLI."""
+    source: str | None = None          # --from meshtasticd|openhop
+    config: str | None = None          # --config PATH (blank = the daemon's default path)
+    profile: str | None = None         # --profile NAME_OR_PATH (instead of --from)
+    cell: str | None = None            # --cell lat,lon  ("" or "none" = deliberately no location)
+    endpoint: str | None = None        # --endpoint URL
+    granularity: str | None = None     # --granularity hour|day
+    skip_radio: bool = False           # --skip-radio: no preflight, no probe/selftest, no first light
+    dry_run: bool = False              # --dry-run: print the target config, write nothing
+    db: str | None = None              # --db: an existing scan database for the first upload
+
+
+def flags_from_args(a) -> Flags:
+    return Flags(source=getattr(a, "source", None), config=getattr(a, "config", None),
+                 profile=getattr(a, "profile", None), cell=getattr(a, "cell", None),
+                 endpoint=getattr(a, "endpoint", None), granularity=getattr(a, "granularity", None),
+                 skip_radio=bool(getattr(a, "skip_radio", False)),
+                 dry_run=bool(getattr(a, "dry_run", False)), db=getattr(a, "db", None))
+
+
+class FlagsIO(IO):
+    """Answers the wizard's prompts from the flags, matching on the prompt text the steps above
+    ask. A prompt no flag covers raises SetupNeedsInput naming the flag that would answer it, so
+    an unattended run never blocks on stdin and never silently takes a default."""
+
+    # (substring of the prompt, Flags field, the flag, blank-when-absent)
+    _ASK = (("Which daemon?", "source", "--from", False),
+            ("Config path", "config", "--config", True),       # blank = the daemon's default path
+            ("Profile name", "profile", "--profile", False),
+            ("lat,lon", "cell", "--cell", False),
+            ("share endpoint", "endpoint", "--endpoint", False))
+
+    def __init__(self, flags: Flags):
+        self.flags = flags
+        self.said = []
+        self._asked = set()
+
+    def ask(self, prompt, default=None):
+        for needle, name, flag, blank_ok in self._ASK:
+            if needle in prompt:
+                value = getattr(self.flags, name)
+                if value is None and blank_ok:
+                    return ""
+                if value is None:
+                    raise SetupNeedsInput(prompt, flag)
+                if prompt in self._asked:
+                    # the wizard re-asks only when it rejected the answer; never loop on a flag
+                    raise SetupBadFlag('setup --non-interactive: the wizard rejected {0} {1!r} '
+                                       '(it asked again: "{2}")'.format(flag, value, prompt))
+                self._asked.add(prompt)
+                value = str(value).strip()
+                return "" if value.lower() == "none" else value
+        # the manual pin prompts: there is no flag for a hand-wired board
+        raise SetupNeedsInput(prompt, "--from or --profile (manual pin entry needs the wizard)")
+
+    def choose(self, prompt, options):
+        if "radio pin settings" in prompt:
+            if self.flags.source:
+                return 0                                  # import from meshtasticd / openHOP
+            if self.flags.profile:
+                return 1                                  # a shipped board profile
+            raise SetupNeedsInput(prompt, "--from or --profile")
+        raise SetupNeedsInput(prompt, "a flag")
+
+    def confirm(self, prompt):
+        if "location from the daemon config" in prompt and self.flags.cell is not None:
+            return False                                  # an explicit --cell overrides the daemon
+        return True
+
+    def say(self, msg):
+        self.said.append(str(msg))
+        print(msg)
+
+
+def _existing_config(home):
+    """(config, it-exists): the station config already on disk, if any."""
+    import os
+    from . import paths, station_config as _sc
+    for p in paths.config_paths(home):
+        if os.path.exists(p):
+            return _sc.load(home), True
+    return _sc.StationConfig(), False
+
+
+def _parse_cell(s):
+    """(location, was-given). '' or 'none' means a deliberate no-location station."""
+    if s is None:
+        return None, False
+    t = str(s).strip()
+    if t == "" or t.lower() == "none":
+        return None, True
+    try:
+        lat, lon = (float(x) for x in t.split(","))
+    except ValueError:
+        raise SetupBadFlag("--cell {0!r} is not lat,lon (e.g. --cell 33.89,-84.25)".format(s))
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise SetupBadFlag("--cell {0} is out of range (lat -90..90, lon -180..180)".format(s))
+    return (lat, lon), True
+
+
+def _profile_exists(name, home) -> bool:
+    import os
+    from . import paths
+    if not name:
+        return False
+    if "/" in name or name.endswith((".yaml", ".yml")):
+        return os.path.isfile(name)
+    return any(os.path.isfile(os.path.join(d, name + ".yaml")) for d in paths.profile_dirs(home))
+
+
+def plan(existing, flags: Flags, home=None):
+    """(target config, changed field names): the existing config with whatever the flags specify
+    written over it. 'profile' in the changed list means the profile has to be derived again —
+    that is the only thing that needs the daemon config and the radio."""
+    import os
+    from . import station_config as _sc
+    if flags.source and flags.profile:
+        raise SetupBadFlag("--from and --profile are alternatives: --from reads the daemon's pins, "
+                           "--profile names a board profile. Pass one.")
+    if flags.config and not flags.source:
+        raise SetupBadFlag("--config names the config of a daemon: pass --from meshtasticd|openhop too.")
+    changed = []
+    profile = existing.profile
+    if flags.profile:
+        name = os.path.splitext(os.path.basename(flags.profile))[0]
+        if name != profile:
+            profile = name
+            changed.append("profile")
+    location = existing.location
+    cell, given = _parse_cell(flags.cell)
+    if given and cell != location:
+        location = cell
+        changed.append("location")
+    endpoint = existing.endpoint or DEFAULT_ENDPOINT
+    if flags.endpoint and flags.endpoint != endpoint:
+        endpoint = flags.endpoint
+        changed.append("endpoint")
+    granularity = existing.granularity or "hour"
+    if flags.granularity and flags.granularity != granularity:
+        granularity = flags.granularity
+        changed.append("granularity")
+    if "profile" not in changed and not _profile_exists(profile, home):
+        changed.append("profile")          # nothing to point at (first run) or the file is gone
+    return _sc.StationConfig(profile=profile, location=location, endpoint=endpoint,
+                             granularity=granularity), changed
+
+
+def _noninteractive_steps(flags: Flags):
+    if not flags.skip_radio:
+        return _default_steps()
+    radio = (step_preflight, step_validate, step_firstlight)
+    return [s for s in _default_steps() if s not in radio]
+
+
+def _fmt(value) -> str:
+    if value is None:
+        return "(none)"
+    if isinstance(value, tuple):
+        return "{0},{1}".format(value[0], value[1])
+    return str(value)
+
+
+def _say_dry_run(io, cfg_path, existing, have, target, changed, flags) -> None:
+    io.say("setup: dry run, nothing written")
+    io.say("  config: {0}{1}".format(cfg_path, "" if have else " (would be created)"))
+    fields = (("profile", target.profile, existing.profile), ("location", target.location, existing.location),
+              ("endpoint", target.endpoint, existing.endpoint), ("granularity", target.granularity, existing.granularity))
+    for name, now, before in fields:
+        if name == "profile" and "profile" in changed and not flags.profile:
+            shown = "(imported from the {0} config)".format(flags.source or "daemon")
+        else:
+            shown = _fmt(now)
+        if not have:
+            io.say("    {0:<12} {1}  (new)".format(name + ":", shown))
+        elif name in changed:
+            io.say("    {0:<12} {1}  (was {2})".format(name + ":", shown, _fmt(before)))
+        else:
+            io.say("    {0:<12} {1}".format(name + ":", shown))
+    if have and not changed:
+        io.say("  nothing would change; a real run would exit 0 without touching the radio.")
+    else:
+        steps = ", ".join(s.__name__.replace("step_", "") for s in _noninteractive_steps(flags)) \
+            if "profile" in changed or not have else "write"
+        io.say("  steps a real run would take: {0}".format(steps))
+
+
+def run_noninteractive(w: Wizard, flags: Flags) -> int:
+    """`lorascan setup --non-interactive`. Exit 0 ok/unchanged/dry-run, 1 a step failed,
+    2 a missing input or a bad flag value (raised as SetupNeedsInput / SetupBadFlag)."""
+    import sys
+    from . import paths, station_config as _sc
+    from dataclasses import replace
+
+    cfg_path = paths.config_path(w.home)
+    existing, have = _existing_config(w.home)
+    target, changed = plan(existing, flags, w.home)
+    w.io = FlagsIO(replace(flags, endpoint=target.endpoint))      # the resolved endpoint answers the prompt
+
+    if flags.dry_run:
+        _say_dry_run(w.io, cfg_path, existing, have, target, changed, flags)
+        return 0
+    if have and not changed:
+        w.io.say("setup: unchanged ({0})".format(cfg_path))
+        return 0
+    if have and "profile" not in changed:
+        # only config fields moved: write them, leave the radio and the endpoint alone
+        w.io.say("setup: updated {0}".format(", ".join(changed)))
+        w.io.say("  wrote {0}".format(_sc.save(target, path=cfg_path)))
+        return 0
+
+    w.state.setdefault("granularity", target.granularity)
+    if target.location:
+        w.state["location"] = target.location                     # kept unless --cell overrides it
+    if flags.db:
+        w.state.setdefault("db", flags.db)
+    for step in _noninteractive_steps(flags):
+        res = step(w)
+        w.io.say(res.summary)
+        if res.ok:
+            continue
+        if step is step_upload and flags.endpoint:
+            w.state["endpoint"] = flags.endpoint                  # as the wizard does: save, verify later
+            continue
+        print("lorascan: setup failed: {0}\n{1}".format(res.summary, res.detail).rstrip(), file=sys.stderr)
+        return 1
+    if flags.skip_radio:
+        w.io.say("  radio checks skipped (--skip-radio): no preflight, probe, self-test or first light — "
+                 "run `lorascan selftest` once the radio is free.")
+    if have:
+        w.io.say("setup: updated {0}".format(", ".join(changed)))
+    else:
+        w.io.say("setup: written {0}".format(cfg_path))
+    return 0

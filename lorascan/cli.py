@@ -660,7 +660,14 @@ def _build_wizard(a):
 
 def cmd_setup(a) -> int:
     from . import setup
-    return setup.run(_build_wizard(a))
+    w = _build_wizard(a)
+    if not getattr(a, "non_interactive", False):
+        return setup.run(w)                       # the guided wizard, unchanged
+    try:                                          # #25: every answer from a flag, idempotent re-runs
+        return setup.run_noninteractive(w, setup.flags_from_args(a))
+    except (setup.SetupNeedsInput, setup.SetupBadFlag) as e:
+        print(f"lorascan: {e}", file=sys.stderr)
+        return 2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -760,8 +767,22 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--sync-dwell", type=float, default=1.0, help="seconds per sync word"); sp.add_argument("--verbose", "-v", action="store_true"); sp.set_defaults(fn=cmd_syncfind)
     sp = sub.add_parser("upload", help="upload a share file written earlier (store-and-forward from any machine)")
     sp.add_argument("file"); sp.add_argument("--to", default=None, help="upload endpoint (default: the station config's share endpoint)"); sp.set_defaults(fn=cmd_upload)
-    sp = sub.add_parser("setup", help="guided first-run: validate pins, import a meshtasticd/openHOP config, set location, verify upload")
+    sp = sub.add_parser("setup", help="guided first-run: validate pins, import a meshtasticd/openHOP config, set location, verify upload (add --non-interactive for a cron/boot script)")
     sp.add_argument("--db", default=None, help="an existing scan database to use for the first upload / first-light graph")
+    sp.add_argument("--non-interactive", action="store_true",
+                    help="answer every question from the flags below instead of asking (for a cron job or a balena/systemd start script). "
+                         "Idempotent: a re-run with the same flags prints `setup: unchanged` and exits 0 without touching the radio; "
+                         "a flag that moves a value updates the config. Exit codes: 0 ok/unchanged, 1 a step failed, 2 a missing flag or a bad value.")
+    sp.add_argument("--from", dest="source", default=None, choices=("meshtasticd", "openhop"),
+                    help="--non-interactive: take the pins (and the location, if it has one) from this daemon's config")
+    sp.add_argument("--config", default=None, help="--non-interactive: the daemon config to read (default: the daemon's own default path)")
+    sp.add_argument("--profile", default=None, help="--non-interactive: a shipped board profile name or a profile path, instead of --from")
+    sp.add_argument("--cell", default=None, help="--non-interactive: antenna location as lat,lon — overrides the daemon's; `--cell none` for a station with no location")
+    sp.add_argument("--endpoint", default=None, help="--non-interactive: community share endpoint (default: https://share.lorascan.app, or the one already in the station config)")
+    sp.add_argument("--granularity", choices=("hour", "day"), default=None, help="--non-interactive: share aggregation (default: hour)")
+    sp.add_argument("--skip-radio", action="store_true",
+                    help="--non-interactive: skip the host preflight, probe, self-test and first-light sweep (for a boot script that runs before the radio is free)")
+    sp.add_argument("--dry-run", action="store_true", help="--non-interactive: print the config that would be written, and how it differs from the current one; write nothing")
     sp.set_defaults(fn=cmd_setup)
     return p
 
