@@ -12,6 +12,7 @@
   `~/.config/lorascan` (then `/etc/lorascan`) when the data dir has none — writes go only to the data dir.
   New module `lorascan.paths`; `TOKEN_PATH`, `PROFILE_DIRS`, `USER_NETWORK_PATHS` and `USER_PATH` are no
   longer import-time constants (they resolve through `lorascan.paths` on access, so `-d` applies).
+- An unwritable or missing `--data-dir` (read-only rootfs, wrong path) is one clean `lorascan: …` line, never a traceback (review finding).
 
 ## 0.1.28 — 2026-09-18
 
