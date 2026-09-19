@@ -54,6 +54,36 @@ lorascan scan survey --db site.db --duration 2h
 lorascan share
 ```
 
+### Read-only hosts / balena: `-d DIR`
+
+Some hosts mount the root filesystem read-only and give you exactly one writable directory — a
+balena repeater, for instance, where that directory is `/data`. One option puts everything
+lorascan reads and writes there, creating any missing subfolders:
+
+```
+lorascan -d /data/lorascan scan quick
+lorascan -d /data/lorascan report
+```
+
+What moves under `DIR`: the station config (`config.yaml`), board profiles (`profiles/`), your
+network table (`networks.yaml`), the share token (`token`), and every output file you did **not**
+name yourself — `lorascan.db`, `lorascan-report.html`, `lorascan-share.json`, the calibrated
+profile. A path you pass explicitly is still used exactly as given, relative to the current
+directory: `-d /data/lorascan report --out /mnt/usb/r.html` writes the report to the stick.
+
+Precedence: `-d/--data-dir` beats the `LORASCAN_DIR` environment variable, which beats the old
+behaviour (config in `~/.config/lorascan`, outputs in the working directory). `LORASCAN_DIR` is
+the easier one for a service:
+
+```
+Environment=LORASCAN_DIR=/data/lorascan
+```
+
+Adopting `-d` on a station that has already been running is safe: config, profiles, the network
+table and the submitter token are still **read** from `~/.config/lorascan` (then `/etc/lorascan`)
+when the data dir has none, so you keep your identity and settings. New writes only ever go to the
+data dir — move the old files across when you want the read-through to stop.
+
 Everything below is the manual path — reach for it when you want to configure a piece by
 hand or understand what `setup` is doing.
 
@@ -132,6 +162,10 @@ lorascan status --db survey.db                 # runs, row counts, age of the la
 lorascan serve  --db survey.db --port 8080     # live report at http://<pi>:8080/ (re-rendered every 60 s)
 lorascan share  --db survey.db --cell 34.12,-84.38 --dry-run   # the opt-in community share file, to read before any upload
 ```
+
+On a host with a read-only rootfs, drop `WorkingDirectory` and give the unit
+`Environment=LORASCAN_DIR=/data/lorascan` (or pass `-d /data/lorascan`): the database, report,
+share file and config all land in that one writable directory. See "Read-only hosts / balena" above.
 
 ### Sharing on a thin or absent uplink
 

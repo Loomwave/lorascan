@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.29 — 2026-09-19
+
+- One option for read-only hosts (#22): `lorascan -d DIR …` (or `LORASCAN_DIR=DIR`) keeps the station
+  config, board profiles, network table, share token **and** every default-named output — `lorascan.db`,
+  `lorascan-report.html`, `lorascan-share.json`, the calibrated profile — under `DIR`, creating missing
+  subfolders. A balena repeater whose only writable directory is `/data` now runs
+  `lorascan -d /data/lorascan scan quick` with nothing written outside it. A path passed explicitly is
+  still used exactly as given. Precedence: the flag, then `LORASCAN_DIR`, then the old layout. Adopting
+  `-d` keeps an existing station's identity: config, profiles, networks and token are still read from
+  `~/.config/lorascan` (then `/etc/lorascan`) when the data dir has none — writes go only to the data dir.
+  New module `lorascan.paths`; `TOKEN_PATH`, `PROFILE_DIRS`, `USER_NETWORK_PATHS` and `USER_PATH` are no
+  longer import-time constants (they resolve through `lorascan.paths` on access, so `-d` applies).
+- An unwritable or missing `--data-dir` (read-only rootfs, wrong path) is one clean `lorascan: …` line, never a traceback (review finding).
+
 ## 0.1.28 — 2026-09-18
 
 - Point people at the results: the README gains a "The community map (share.lorascan.app)" section (what is

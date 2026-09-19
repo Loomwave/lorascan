@@ -82,7 +82,17 @@ LOOMWAVE = Network("loomwave", 0x12, (
 
 BUILTIN_NETWORKS: list[Network] = [MESHTASTIC, LORAWAN_US915, MESHCORE, LOOMWAVE]
 NETWORKS: list[Network] = list(BUILTIN_NETWORKS)      # the active table; set_networks() replaces it (user table, #2 item 4)
-USER_NETWORK_PATHS = [os.path.expanduser("~/.config/lorascan/networks.yaml"), "/etc/lorascan/networks.yaml"]
+def user_network_paths() -> list:
+    """<data dir>/networks.yaml (-d/--data-dir), then ~/.config/lorascan/networks.yaml, then /etc."""
+    from . import paths
+    return paths.networks_paths()
+
+
+def __getattr__(name):
+    """USER_NETWORK_PATHS used to be an import-time constant; -d is applied after import (#22)."""
+    if name == "USER_NETWORK_PATHS":
+        return user_network_paths()
+    raise AttributeError(name)
 
 
 def set_networks(nets: list) -> None:
@@ -139,7 +149,7 @@ def merge_networks(builtin: list, user: list) -> list:
 
 
 def load_default_user_networks() -> list[Network]:
-    for p in USER_NETWORK_PATHS:
+    for p in user_network_paths():
         if os.path.exists(p):
             return load_user_networks(p)
     return []
