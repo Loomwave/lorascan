@@ -108,8 +108,10 @@ def build_data(store, run_id=None, bucket_s: int | None = 60, rssi_offset_db: fl
         except ValueError:
             fa = None
     by_bw = store.channel_summary_by_bw(run_id, since)
-    slot_recommend = (recommend_grid_slots(by_bw, cads, decs, recommend_bw, exclusions) if recommend_grid
-                       else recommend_slots(by_bw, cads, decs, recommend_bw, exclusions))
+    slot_recommend = (recommend_grid_slots(by_bw, cads, decs, recommend_bw, exclusions,
+                                            rssi_offset_db=rssi_offset_db) if recommend_grid
+                       else recommend_slots(by_bw, cads, decs, recommend_bw, exclusions,
+                                             rssi_offset_db=rssi_offset_db))
     return {
         "slot_recommend": slot_recommend,
         "cad_false_alarm": fa,

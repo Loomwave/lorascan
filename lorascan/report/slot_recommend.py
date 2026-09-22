@@ -9,7 +9,11 @@ def _in_window(freq: int, start: int, end: int) -> bool:
     return start <= freq < end
 
 
-def recommend_slots(by_bw, cad, decodes, width_hz: int = 500_000, exclusions=None) -> dict:
+def recommend_slots(by_bw, cad, decodes, width_hz: int = 500_000, exclusions=None,
+                     rssi_offset_db: float = 0.0) -> dict:
+    """rssi_offset_db (Loomwave/lorascan#13) is added to the DISPLAYED dBm fields (floor_w, peak_w and
+    the why line) so a calibrated board reads the same absolute floor here as in the quietest-channels
+    table. Scores and penalties are differences, so the uniform offset cancels and the pick is unchanged."""
     zones = list(DEFAULT_EXCLUSIONS) if exclusions is None else list(exclusions)
     half = width_hz // 2
     width_rows = [c for c in by_bw if c["bw_hz"] == width_hz]
@@ -40,10 +44,10 @@ def recommend_slots(by_bw, cad, decodes, width_hz: int = 500_000, exclusions=Non
         carrier_pen = round(max(0.0, (worst_narrow_floor - band_best_floor) / 10.0), 4)
         score = round(wr["busy_mean"] + cad_hit_max + frames / 10.0 + carrier_pen, 4)
         excluded = overlaps(start, end, zones)
-        why = _why(wr, cad_hit_max, frames, carrier_pen, narrow_by_freq, excluded)
+        why = _why(wr, cad_hit_max, frames, carrier_pen, narrow_by_freq, excluded, rssi_offset_db)
         windows.append({"center_hz": center, "center_mhz": center / 1e6, "start_hz": start, "end_hz": end,
                         "start_mhz": start / 1e6, "end_mhz": end / 1e6, "busy_w": round(wr["busy_mean"], 4),
-                        "floor_w": wr["floor_med"], "peak_w": wr["peak_max"], "cad_hit_max": round(cad_hit_max, 4),
+                        "floor_w": wr["floor_med"] + rssi_offset_db, "peak_w": wr["peak_max"] + rssi_offset_db, "cad_hit_max": round(cad_hit_max, 4),
                         "cad_sf_max": cad_sf_max, "decoded": ", ".join(f"{n}:{c}" for n, c in sorted(dec.items())),
                         "decoded_frames": frames, "carrier_pen": carrier_pen, "excluded": excluded, "score": score,
                         "why": why})
@@ -96,23 +100,24 @@ def grid_width_rows(by_bw, centers, width_hz: int = 500_000) -> list[dict]:
 
 
 def recommend_grid_slots(by_bw, cad, decodes, width_hz: int = 500_000, exclusions=None,
-                          base_hz: int = 902_250_000) -> dict:
+                          base_hz: int = 902_250_000, rssi_offset_db: float = 0.0) -> dict:
     """Grid-aligned variant of recommend_slots: rank the fixed .250/.750 MeshCore-500 channels instead of
     a free grid of windows, by feeding recommend_slots synthetic per-grid-center rows built from the real
     scan data. Reuses recommend_slots' scoring/sorting/exclusion logic unchanged."""
     centers = grid_centers(width_hz, base_hz)
     synth = grid_width_rows(by_bw, centers, width_hz)
     narrow_rows = [c for c in by_bw if c["bw_hz"] != width_hz]
-    result = recommend_slots(synth + narrow_rows, cad, decodes, width_hz, exclusions)
+    result = recommend_slots(synth + narrow_rows, cad, decodes, width_hz, exclusions, rssi_offset_db)
     result["grid"] = True
     result["base_hz"] = base_hz
     return result
 
 
-def _why(wr, cad_hit_max, frames, carrier_pen, narrow_by_freq, excluded) -> str:
+def _why(wr, cad_hit_max, frames, carrier_pen, narrow_by_freq, excluded, rssi_offset_db: float = 0.0) -> str:
     if excluded:
         return "overlaps an exclusion zone"
-    parts = [f"busy {wr['busy_mean'] * 100:.0f}%", f"floor {wr['floor_med']:.0f} dBm"]
+    floor_shown = wr['floor_med'] + rssi_offset_db
+    parts = [f"busy {wr['busy_mean'] * 100:.0f}%", f"floor {floor_shown:.0f} dBm"]
     if frames:
         parts.append(f"{frames} known-LoRa frames")
     elif cad_hit_max > 0:
@@ -123,7 +128,7 @@ def _why(wr, cad_hit_max, frames, carrier_pen, narrow_by_freq, excluded) -> str:
         loud = max(narrow_by_freq.items(), key=lambda kv: kv[1][1])
         parts.append(f"carrier near {loud[0] / 1e6:.2f} MHz raises the floor")
     elif carrier_pen > 0:
-        parts.append(f"floor {wr['floor_med']:.0f} dBm above band best raises the score")
+        parts.append(f"floor {floor_shown:.0f} dBm above band best raises the score")
     else:
         parts.append("clear of exclusion zones")
     return ", ".join(parts)
