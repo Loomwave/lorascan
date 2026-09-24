@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.31 — 2026-09-24
+
+- **The Loomwave fleet moved to SF11/BW500** on 2026-09-24 (the #451 flag day: the 500 kHz mode that
+  qualifies under FCC Part 15.247), and lorascan's built-in `loomwave/fleet` preset still said SF9/BW125 —
+  so a decode at 911.5 MHz silently stopped naming Loomwave traffic. `fleet` is now SF11/BW500, and the
+  retired PHY stays decodable as an explicit **`fleet-pre451`** preset (SF9/BW125, same frequency): boards
+  flashed before the flag day keep transmitting it until they are reflashed, and finding them is exactly
+  what you want during a cutover. A scan at 911.5 MHz now tries both. `bench-cell` (905.0 MHz) moves to
+  SF11/BW500 with the fleet.
+- Fix (#13): on a calibrated board the "Recommended 500 kHz slot" section and the terminal `why` line now
+  report the recommendation floor in the same units as the quietest-channels table (raw floor +
+  `rssi_offset_db`). The pick itself was already unaffected — the offset is uniform, so scores and
+  penalties are unchanged — only the displayed dBm disagreed.
+- CI (#28): pytest on Python 3.11, 3.12 and 3.13 plus a wheel install smoke test on every push and PR, so
+  the 3.11 interpreter the Pi images run is a gate rather than a manual release step.
+
 ## 0.1.30 — 2026-09-19
 
 - `lorascan setup --non-interactive` (#25): first-run setup from a cron job, a balena start script or a

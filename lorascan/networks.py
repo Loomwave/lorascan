@@ -4,7 +4,7 @@ settings docs + RadioLibInterface (sync 0x2B; slot = freqStart + bw/2 + k*bw); L
 US915 (64 x 125 kHz uplinks from 902.3 MHz every 200 kHz, 8 x 500 kHz from 903.0 every 1.6 MHz,
 8 x 500 kHz downlinks from 923.3 every 600 kHz, sync 0x34); MeshCore US recommended 910.525 MHz
 SF7/BW62.5/CR5 (sync word NOT confirmed from source: RadioLib default 0x12 assumed); Loomwave fleet
-911.5 MHz SF9/BW125 private sync."""
+911.5 MHz SF11/BW500 private sync (SF9/BW125 before 2026-09-24)."""
 from __future__ import annotations
 from dataclasses import dataclass, field
 import json
@@ -76,8 +76,12 @@ MESHCORE = Network("meshcore", 0x12, (
 ), "sync word 0x12: assumed from the RadioLib default and confirmed on the bench 2026-09-14 (a CRC-valid 74 B us-narrow frame at -33 dBm)")
 
 LOOMWAVE = Network("loomwave", 0x12, (
-    Preset("fleet", 9, 125, 5, preamble=16, freqs_hz=(911_500_000,)),
-    Preset("bench-cell", 9, 125, 5, preamble=16, freqs_hz=(905_000_000,)),
+    # The fleet moved SF9/BW125 -> SF11/BW500 on 2026-09-24 (the #451 flag day: the 500 kHz mode that
+    # qualifies under FCC Part 15.247). "fleet-pre451" keeps the retired PHY decodable on purpose: boards
+    # flashed before that date keep transmitting it until reflashed, and finding them is the point.
+    Preset("fleet", 11, 500, 5, preamble=16, freqs_hz=(911_500_000,)),
+    Preset("fleet-pre451", 9, 125, 5, preamble=16, freqs_hz=(911_500_000,)),
+    Preset("bench-cell", 11, 500, 5, preamble=16, freqs_hz=(905_000_000,)),
 ), "private sync 0x12")
 
 BUILTIN_NETWORKS: list[Network] = [MESHTASTIC, LORAWAN_US915, MESHCORE, LOOMWAVE]
